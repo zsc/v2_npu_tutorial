@@ -16,10 +16,17 @@ NPU的存储层次通常包含三个主要层级，每层在容量、带宽、�
 - 功耗：~1 pJ/bit access
 - 容量：通常10-100 MB（占芯片面积的30-50%）
 
+SRAM的物理实现通常采用6T或8T单元结构。6T SRAM单元包含6个晶体管，面积约为0.05 μm²（7nm工艺），而8T SRAM提供独立的读写端口，避免读干扰但面积增加约30%。在NPU设计中，通常采用混合策略：权重缓存使用高密度6T SRAM，而需要频繁读写的激活缓存使用8T SRAM。
+
 对于200 TOPS的NPU，假设MAC利用率为80%，nvfp4精度下：
 $$\text{所需带宽} = 200 \times 10^{12} \times 0.8 \times 3 \times 4 \text{ bits/s} = 1.92 \text{ Pb/s} = 240 \text{ TB/s}$$
 
 其中因子3来自两个输入操作数和一个输出，因子4是nvfp4的位宽。
+
+这个带宽需求远超单片SRAM所能提供，因此需要采用分布式SRAM架构。假设采用1024个SRAM bank，每个bank需要提供：
+$$\text{Bank带宽} = \frac{240 \text{ TB/s}}{1024} = 234 \text{ GB/s}$$
+
+在1 GHz时钟频率下，每个bank需要234位宽的接口，这在物理实现上是可行的。
 
 **HBM技术演进**
 
@@ -31,7 +38,14 @@ HBM代际对比：
 带宽      460      819      1230    GB/s/stack
 容量      16       24       36      GB/stack  
 功耗效率   7        5.5      4.5     pJ/bit
+I/O宽度   1024     1024     1024    bits
+频率      3.6      6.4      9.6     Gbps/pin
+电压      1.2      1.1      1.1     V
 ```
+
+HBM采用2.5D封装技术，通过硅中介层（interposer）实现与主芯片的连接。每个HBM stack包含8-12层DRAM die，通过TSV（Through Silicon Via）垂直互连。对于200 TOPS的NPU设计，典型配置为4个HBM3 stack，提供总计3.2 TB/s的带宽和96 GB的容量。
+
+HBM的关键优势在于其极短的物理距离（<10mm）和宽I/O接口，相比GDDR6降低了约3倍的pJ/bit访问能耗。然而，HBM的成本约为DDR的5-8倍，且需要先进封装技术支持。
 
 **DDR与GDDR权衡**
 
@@ -39,6 +53,17 @@ DDR提供大容量但带宽有限，GDDR则在两者间取得平衡：
 - DDR5：~50 GB/s/channel，容量可达128GB/DIMM
 - GDDR6X：~80 GB/s/chip，容量2-4GB/chip
 - 功耗：DDR ~20 pJ/bit，GDDR ~15 pJ/bit
+
+在自动驾驶场景中，需要存储大量的高精地图、历史轨迹和中间特征图。一个典型的BEV感知模型可能需要：
+- 输入缓存：6个相机 × 1920×1080×3 × 4 bytes = 150 MB
+- 特征图缓存：多尺度特征 ~500 MB
+- 历史帧缓存：10帧 × 200 MB = 2 GB
+- 模型权重：~1 GB（INT8量化后）
+
+因此，边缘端NPU通常采用混合存储架构：
+1. 片上SRAM（50 MB）：存储当前计算tile和部分权重
+2. HBM/GDDR（8-16 GB）：存储完整模型和中间结果
+3. DDR（32-64 GB）：存储历史数据和预取缓冲
 
 ### 4.1.2 存储带宽需求计算
 
@@ -59,6 +84,21 @@ $$B_{\text{no-reuse}} = \frac{(MK + KN + MN) \times \text{bits}}{2MNK / \text{FL
 - Weight Stationary (WS)：缓存权重矩阵块
   $$B_{WS} = \frac{2 \times \text{bits} \times \text{FLOPS}}{M}$$
 
+**实际案例：Transformer中的Attention计算**
+
+考虑自动驾驶中的多相机BEV Transformer，序列长度 $L = 10000$（100×100的BEV网格），嵌入维度 $d = 256$：
+
+1. Q、K、V投影：$3 \times L \times d^2$ 计算量
+   - 带宽需求：$\frac{3Ld(L+d) \times 4 \text{ bits}}{3Ld^2 \times 2} = \frac{2(L+d)}{d} = 78.5$ bits/FLOP
+
+2. Attention分数计算：$Q \times K^T$，计算量 $2L^2d$
+   - 带宽需求：$\frac{2Ld \times 4 + L^2 \times 4}{2L^2d} = \frac{4}{d} + \frac{2}{L} ≈ 0.016$ bits/FLOP
+
+3. 加权求和：$\text{Softmax}(\text{scores}) \times V$，计算量 $2L^2d$
+   - 带宽需求：类似于步骤2
+
+可见，Attention的不同阶段对带宽要求差异巨大，需要动态调整数据流策略。
+
 **带宽效率指标**
 
 定义带宽效率 $\eta_B$ 为实际计算吞吐量与理论峰值的比值：
@@ -66,6 +106,22 @@ $$\eta_B = \frac{\text{实际FLOPS}}{\min(\text{计算峰值}, \text{带宽} \ti
 
 其中算术强度（Arithmetic Intensity）定义为：
 $$AI = \frac{\text{FLOPs}}{\text{Bytes accessed}}$$
+
+**Roofline模型应用**
+
+对于200 TOPS NPU，假设HBM带宽3.2 TB/s，构建Roofline模型：
+
+1. 计算屋顶线：200 TOPS（nvfp4）
+2. 内存屋顶线：$3.2 \text{ TB/s} \times AI$
+3. 平衡点：$AI_{balance} = \frac{200 \times 10^{12}}{3.2 \times 10^{12}} = 62.5$ FLOPS/byte
+
+常见算子的算术强度：
+- 全连接层（1024×1024）：$AI = \frac{2 \times 1024^3}{3 \times 1024^2 \times 4} ≈ 171$ FLOPS/byte
+- 1×1卷积：$AI ≈ \frac{2 \times C_{out}}{4}$ （假设输入已缓存）
+- 3×3卷积：$AI ≈ \frac{2 \times 9 \times C_{out}}{4 \times 9 + 4}$ 
+- Depthwise 3×3：$AI ≈ \frac{18}{40} = 0.45$ FLOPS/byte
+
+可见，depthwise卷积严重受限于内存带宽，而大矩阵乘法则受限于计算能力。
 
 ### 4.1.3 Bank冲突与访问模式优化
 
@@ -105,6 +161,31 @@ Bank数量选择需要平衡面积开销和访问灵活性。常见配置：
    - 优点：适合depthwise操作
    - 缺点：大通道数时缓存利用率低
 
+3. NCHWc布局（通道分块）：将C维度分块为C/c × c
+   - 结合两种布局优点
+   - c通常选择为SIMD宽度（如16或32）
+
+**实际访问模式优化案例**
+
+以YOLOv8的C2f模块为例（输入256×80×80，输出256×80×80）：
+
+采用NCHW布局时的Bank访问模式：
+```
+时刻t:   Bank[0]: C0,H0,W0-W15
+         Bank[1]: C0,H0,W16-W31
+         ...
+         Bank[4]: C0,H1,W0-W15
+```
+
+问题：当卷积kernel跨行时，会访问Bank[0]和Bank[4]，可能造成冲突。
+
+优化方案：
+1. Padding对齐：将宽度从80 padding到84（Bank数的倍数）
+2. 交织存储：$\text{Bank}_{id} = (C \times 7 + H \times 13 + W) \mod N_{banks}$
+3. 双缓冲：一个buffer用于当前行，另一个预取下一行
+
+这样可将Bank冲突率从15%降低到2%以下。
+
 **冲突消除策略**
 
 1. 地址交织（Interleaving）：
@@ -113,6 +194,36 @@ Bank数量选择需要平衡面积开销和访问灵活性。常见配置：
 2. 素数Bank数量：选择素数个Bank（如17、31）减少规律性冲突
 
 3. 双缓冲（Double Buffering）：计算与数据传输重叠
+
+**Bank仲裁器设计**
+
+多端口Bank访问需要仲裁机制，常见策略：
+
+1. 固定优先级：计算单元 > DMA > 调试接口
+2. 轮询（Round-Robin）：公平但可能降低关键路径性能
+3. 加权轮询：根据请求源的带宽需求分配权重
+4. 信用机制（Credit-based）：每个请求源有信用额度
+
+仲裁延迟模型：
+$$T_{access} = T_{arbitration} + T_{bank\_access} + T_{routing}$$
+
+典型值（1GHz时钟）：
+- $T_{arbitration}$：1 cycle（简单仲裁）或2-3 cycles（复杂仲裁）
+- $T_{bank\_access}$：1-2 cycles
+- $T_{routing}$：1 cycle（近距离）或2-3 cycles（跨片）
+
+**存储一致性保证**
+
+在多个计算单元共享Bank时，需要保证数据一致性：
+
+1. 写后读（RAW）hazard：通过scoreboard跟踪pending写操作
+2. 写后写（WAW）hazard：保证写操作的顺序
+3. 原子操作支持：实现atomic_add等操作用于累加
+
+硬件实现通常采用：
+- 版本号机制：每个地址关联版本号
+- 锁机制：细粒度锁保护关键区域
+- 事务内存：支持回滚的投机执行
 
 ## 4.2 数据重用模式
 
@@ -161,6 +272,33 @@ $$\min D = \sum_{i} \frac{s_i \times u_i}{r_i}$$
 - $r_i$：数据 $i$ 的重用次数
 
 约束条件：$\sum_{i \in \text{on-chip}} s_i \leq S$
+
+**具体示例：MobileNet中的Depthwise Separable卷积**
+
+考虑MobileNetV3中的一个典型块，输入112×112×24，输出112×112×96：
+
+1. Depthwise 3×3：
+   - 计算量：$112^2 \times 24 \times 9 \times 2 = 5.4M$ FLOPs
+   - 数据量：
+     - 输入：$112^2 \times 24 \times 4 = 1.2$ MB
+     - 权重：$3^2 \times 24 \times 4 = 0.9$ KB
+     - 输出：$112^2 \times 24 \times 4 = 1.2$ MB
+   - 算术强度：$\frac{5.4M}{2.4M} = 2.25$ FLOPs/byte
+
+2. Pointwise 1×1：
+   - 计算量：$112^2 \times 24 \times 96 \times 2 = 57.8M$ FLOPs
+   - 数据量：
+     - 输入：$112^2 \times 24 \times 4 = 1.2$ MB（可重用上一步输出）
+     - 权重：$24 \times 96 \times 4 = 9.2$ KB
+     - 输出：$112^2 \times 96 \times 4 = 4.8$ MB
+   - 算术强度：$\frac{57.8M}{6.0M} = 9.6$ FLOPs/byte
+
+优化策略：
+1. 融合执行：将depthwise和pointwise融合，避免中间结果写回
+2. 空间tiling：将112×112分成7×7个16×16的tile
+3. 通道分块：将96个输出通道分成3批，每批32通道
+
+通过这些优化，可将总数据传输量从8.4 MB降低到2.1 MB，提高4倍性能。
 
 ### 4.2.2 Loop Tiling与Blocking策略
 
@@ -215,6 +353,29 @@ L3 Cache Tile: 256×256×256
 
 每级的tile大小比例通常遵循：
 $$\frac{T_{L_{i+1}}}{T_{L_i}} \approx \sqrt[3]{\frac{S_{L_{i+1}}}{S_{L_i}}}$$
+
+**Tiling搜索空间优化**
+
+对于一个6层嵌套循环的卷积操作（N, C, H, W, K, R, S），tiling参数空间为：
+$$|\mathcal{S}| = \prod_{i=1}^{7} d_i$$
+
+其中$d_i$是维度$i$的可能分块大小数。对于典型的224×224×256卷积层，搜索空间可达$10^{15}$。
+
+常用优化方法：
+1. 解析模型：基于屋顶线模型预测性能
+   $$T_{exec} = \max(T_{compute}, T_{memory})$$
+   
+2. 机器学习方法：使用XGBoost/LSTM预测最优tiling
+   - 训练数据：随机采样的10000个配置
+   - 特征：tile大小、重用率、带宽需求
+   - 目标：实测执行时间
+
+3. 遗传算法：平衡探索与利用
+   - 初始种群：基于启发式规则
+   - 适应度函数：$f = \alpha \times \text{FLOPS} - \beta \times \text{Energy}$
+   - 变异策略：随机扰动tile大小
+
+实践中，通常结合三种方法：解析模型快速筛选，ML模型精细调优，遗传算法处理边缘情况。
 
 ### 4.2.3 Dataflow分类：WS/OS/RS
 
@@ -292,6 +453,33 @@ $$E_{total} = E_{RF} \times N_{RF} + E_{NoC} \times N_{NoC} + E_{DRAM} \times N_
 - $E_{NoC}$ ≈ 2-6 pJ  
 - $E_{DRAM}$ ≈ 200 pJ
 
+**实际案例：Eyeriss v2的RS数据流实现**
+
+Eyeriss v2采用分层式RS数据流，针对不同层类型自适应调整：
+
+1. CONV层映射：
+   - 每个PE处理1D卷积（1×1×K）
+   - 水平PE共享输入激活
+   - 垂直PE共享部分和
+   - 对角PE共享权重
+
+2. FC层映射：
+   - 切换到OS模式
+   - 每个PE负责1个输出神经元
+   - 权重广播至所有PE
+
+3. Depthwise层映射：
+   - 每个PE处理一个通道
+   - 无需PE间通信
+   - 最大化并行度
+
+能效对比（AlexNet CONV2层）：
+- WS：1.4 TOPS/W
+- OS：1.6 TOPS/W  
+- RS：2.5 TOPS/W
+
+RS通过灵活的数据流切换，在不同层类型上都能达到较高效率。但代价是控制逻辑复杂度增加约40%，面积开销增加15%。
+
 ## 4.3 DMA设计与数据预取
 
 DMA（Direct Memory Access）是NPU中实现计算与数据传输重叠的关键组件。通过精心设计的DMA系统和预取策略，可以有效隐藏内存访问延迟，提高整体系统性能。
@@ -324,6 +512,35 @@ DMA（Direct Memory Access）是NPU中实现计算与数据传输重叠的关键
 - 队列深度：16-64个待处理请求
 - 支持模式：线性、2D/3D块传输、scatter-gather
 
+**多通道DMA设计考量**
+
+在自动驾驶NPU中，不同通道通常专门用于特定数据类型：
+
+1. 相机数据通道（6个）：
+   - 实时从MIPI/GMSL接口接收
+   - 时延要求：< 10ms
+   - 带宽：6 × 4MP × 30fps × 12bit = 3.5 GB/s
+
+2. 特征图通道（4个）：
+   - 在多个网络层间传输中间特征
+   - 支持2D/3D tensor转置
+   - 带宽：~20 GB/s
+
+3. 权重加载通道（2个）：
+   - 预加载下一层权重
+   - 支持2:4稀疏解压
+   - 带宽：~5 GB/s
+
+4. 输出通道（2个）：
+   - 将结果写回主存
+   - 支持NMS后处理
+   - 带宽：~2 GB/s
+
+通道优先级设置：
+$$P_i = \alpha_i \times \text{latency\_sensitivity} + \beta_i \times \text{bandwidth\_demand}$$
+
+其中相机数据通道的$\alpha$最高，确保实时性。
+
 **带宽分配策略**
 
 多通道DMA的带宽分配可建模为优化问题：
@@ -350,6 +567,42 @@ $$\max \sum_{i=1}^{N} w_i \times \min(r_i, b_i)$$
 
 3. 循环缓冲模式：
    $$\text{addr} = \text{base} + (\text{offset} \bmod \text{size})$$
+
+4. 3D tensor模式（用于BEV特征）：
+   $$\text{addr} = \text{base} + z \times S_z + y \times S_y + x \times S_x$$
+   
+   其中$S_z = H \times W \times C$, $S_y = W \times C$, $S_x = C$
+
+5. 稀疏索引模式（用于2:4稀疏）：
+   $$\text{addr} = \text{base} + \text{index}[i] \times \text{elem\_size}$$
+
+**地址生成器的硬件实现**
+
+```
+     ┌─────────────────┐
+     │  Base Register  │
+     └───────┬─────────┘
+              │
+     ┌────────┴─────────┐
+     │   Counter Bank   │
+     │  [X][Y][Z][N]    │
+     └───────┬──────────┘
+              │
+     ┌────────┴─────────┐
+     │  Stride Multiply │
+     └────────┬─────────┘
+              │
+     ┌────────┴─────────┐
+     │   Accumulator    │
+     └────────┬─────────┘
+              │
+         Final Address
+```
+
+关键优化：
+- 使用移位代替乘法（当stride为2的幂）
+- 多级计数器级联，减少进位链延迟
+- 预计算常用stride组合
 
 ### 4.3.2 描述符与链表管理
 
@@ -382,6 +635,26 @@ struct DMADescriptor {
 - Shadow寄存器：预加载下一个描述符
 - 描述符缓存：减少重复读取开销
 - 批量更新：减少描述符写回次数
+
+**描述符压缩技术**
+
+为减少描述符存储开销，可采用压缩编码：
+
+1. 差分编码：存储与前一描述符的差值
+   $$\text{desc}_i = \text{desc}_{i-1} + \Delta_i$$
+
+2. 模板编码：预定义常用模板
+   - 模板0：连续线性传输
+   - 模板1：2D块传输（图像）
+   - 模板2：3D tensor传输
+
+3. 位域压缩：减少未使用位
+   ```
+   原始：64bit地址 + 32bit长度 + 16bit stride = 112 bits
+   压缩：32bit基址 + 16bit偏移 + 16bit长度 + 8bit stride = 72 bits
+   ```
+
+通过这些技术，可将描述符存储开销减少40-60%。
 
 ### 4.3.3 预取策略与隐藏延迟
 
@@ -432,3 +705,172 @@ $$\eta_{pipeline} = \frac{T_{compute}}{\max(T_{compute}, T_{load}, T_{store})}$$
 
 则需要的预取深度：
 $$N_{prefetch} = \lceil \frac{100 \text{ cycles} \times 1 \text{ GHz}}{1000 \text{ GFLOPS} / 100 \text{ GB/s}} \rceil = 10$$
+
+**预取性能建模**
+
+考虑预取准确率和覆盖率：
+
+$$\text{Speedup} = \frac{1}{(1-h) + \frac{h}{1+\alpha \times p}}$$
+
+其中：
+- $h$：预取命中率
+- $p$：预取覆盖率（隐藏的延迟比例）  
+- $\alpha$：预取开销系数
+
+实际测量数据（ResNet-50）：
+- 静态预取：$h=0.95$, $p=0.8$, 加速1.7倍
+- 动态预取：$h=0.85$, $p=0.9$, 加速1.6倍
+- 混合策略：$h=0.92$, $p=0.85$, 加速1.75倍
+
+## 4.4 片上网络(NoC)基础
+
+片上网络是NPU内部各计算单元、存储单元和I/O接口之间的通信基础设施。良好的NoC设计对于实现高效的数据流和低延迟通信至关重要。
+
+### 4.4.1 NoC拓扑结构
+
+**常见拓扑对比**
+
+```
+总线(Bus):          环形(Ring):        网格(Mesh):
+┌─┬─┬─┬─┬─┐        ┌──┐──┌──┐        ┌──┬──┬──┐
+│ │ │ │ │ │        │  └──┘  │        │  │  │  │
+└─┴─┴─┴─┴─┘        │        │        ├──┼──┼──┤
+                    │  ┌──┐  │        │  │  │  │
+                    └──┘  └──┘        ├──┼──┼──┤
+                                      │  │  │  │
+                                      └──┴──┴──┘
+```
+
+性能特征比较：
+| 拓扑 | 直径 | 分割带宽 | 成本 | 扩展性 |
+|------|------|----------|------|--------|
+| 总线 | 1 | O(1) | 低 | 差 |
+| 环形 | N/2 | O(2) | 低 | 中 |
+| 2D网格 | 2√N | O(√N) | 中 | 好 |
+| Torus | √N | O(2√N) | 高 | 好 |
+| 胖树 | logN | O(N) | 高 | 优秀 |
+
+对于200 TOPS的NPU，典型选择16×16的2D Mesh，提供：
+- 256个节点
+- 最大跳数：30
+- 分割带宽：16×链路带宽
+
+### 4.4.2 路由算法与流控
+
+**维序路由(Dimension-Order Routing)**
+
+最常用的死锁避免路由算法，先沿X维路由，再沿Y维：
+
+```python
+def xy_routing(src_x, src_y, dst_x, dst_y):
+    # 先X后Y，避免死锁
+    path = []
+    # X维路由
+    while src_x != dst_x:
+        if src_x < dst_x:
+            path.append("EAST")
+            src_x += 1
+        else:
+            path.append("WEST") 
+            src_x -= 1
+    # Y维路由
+    while src_y != dst_y:
+        if src_y < dst_y:
+            path.append("NORTH")
+            src_y += 1
+        else:
+            path.append("SOUTH")
+            src_y -= 1
+    return path
+```
+
+**自适应路由**
+
+根据网络拥塞动态选择路径：
+
+$$P_{route} = \arg\min_{p \in \text{paths}} \sum_{l \in p} C_l$$
+
+其中$C_l$是链路$l$的拥塞度量。
+
+**虚通道(Virtual Channel)**
+
+通过多个虚拟通道共享物理链路，提高利用率并避免死锁：
+
+```
+物理链路
+┌─────────────────────┐
+│  VC0: [████    ]    │
+│  VC1: [  ████  ]    │
+│  VC2: [      ████]  │
+│  VC3: [██      ]    │
+└─────────────────────┘
+```
+
+虚通道分配策略：
+- 静态分配：不同消息类型使用固定VC
+- 动态分配：基于信用的VC分配
+- 逃逸通道：保留一个VC用于死锁恢复
+
+### 4.4.3 流控机制
+
+**信用流控(Credit-based Flow Control)**
+
+接收方向发送方发放信用，控制数据发送：
+
+```
+发送方                     接收方
+┌──────┐                 ┌──────┐
+│Buffer│ ──data(3 flits)─> │Buffer│
+│      │ <──credit(3)──── │      │
+└──────┘                 └──────┘
+```
+
+信用计算：
+$$\text{Credits} = \lceil \frac{\text{RTT} \times BW}{\text{flit\_size}} \rceil + \text{buffer\_depth}$$
+
+**背压机制(Backpressure)**
+
+当下游拥塞时，向上游传播停止信号：
+
+$$\text{Throughput} = \min_{i \in \text{path}}(\text{capacity}_i \times (1 - \text{congestion}_i))$$
+
+### 4.4.4 NoC性能建模
+
+**延迟模型**
+
+端到端延迟包含多个组成部分：
+
+$$L_{total} = L_{header} + L_{router} \times H + L_{link} \times H + L_{contention}$$
+
+其中：
+- $L_{header}$：包头处理延迟
+- $L_{router}$：单跳路由延迟（2-4 cycles）
+- $L_{link}$：链路传输延迟（1 cycle）
+- $H$：跳数
+- $L_{contention}$：竞争延迟
+
+**带宽模型**
+
+有效带宽受多个因素影响：
+
+$$BW_{effective} = BW_{physical} \times \eta_{protocol} \times \eta_{routing} \times (1 - P_{conflict})$$
+
+典型效率值：
+- $\eta_{protocol}$：0.8-0.9（协议开销）
+- $\eta_{routing}$：0.7-0.85（路由效率）
+- $P_{conflict}$：0.1-0.3（冲突概率）
+
+**实际案例：Google TPU v4的ICI**
+
+TPU v4使用3D Torus拓扑的Inter-Chip Interconnect (ICI)：
+- 4096个芯片互连
+- 每芯片6个100 Gbps链路
+- 总分割带宽：4.8 Tbps
+- 平均延迟：< 5μs
+- 支持全规约带宽：340 GB/s
+
+优化技术：
+1. 自适应路由避免热点
+2. 多轨道减少冲突
+3. 硬件集合通信原语
+4. 拥塞感知的流调度
