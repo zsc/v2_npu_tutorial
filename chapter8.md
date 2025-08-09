@@ -294,71 +294,694 @@ M % 32 的分布：
 
 ### 1.4 验证环境架构
 
-采用UVM（Universal Verification Methodology）构建可重用验证环境：
+采用业界标准的UVM（Universal Verification Methodology）构建层次化、可重用的验证环境。UVM提供了标准化的验证组件和通信机制，大幅提高验证效率和代码重用性。
+
+**UVM验证平台架构**
+
+完整的脉动阵列验证环境包含多个协同工作的组件：
 
 ```
-        ┌─────────────┐
-        │  Sequencer  │ ← 生成测试激励
-        └──────┬──────┘
-               │
-        ┌──────▼──────┐
-        │   Driver    │ ← 驱动DUT输入
-        └──────┬──────┘
-               │
-        ┌──────▼──────┐
-        │     DUT     │ ← 待测设计
-        └──────┬──────┘
-               │
-        ┌──────▼──────┐
-        │   Monitor   │ ← 采集输出
-        └──────┬──────┘
-               │
-        ┌──────▼──────┐
-        │  Scoreboard │ ← 结果比对
-        └─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Test Environment                      │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────┐                    ┌────────────────┐  │
+│  │  Test Case  │                    │  Config Object │  │
+│  └──────┬──────┘                    └────────────────┘  │
+│         │                                               │
+│  ┌──────▼────────────────────────────────────────────┐  │
+│  │                    ENV (Environment)               │  │
+│  ├────────────────────────────────────────────────────┤  │
+│  │  ┌────────────┐  ┌────────────┐  ┌─────────────┐ │  │
+│  │  │  Agent_In  │  │ Agent_Out  │  │  Scoreboard │ │  │
+│  │  ├────────────┤  ├────────────┤  └─────────────┘ │  │
+│  │  │ Sequencer  │  │  Monitor   │                   │  │
+│  │  │   Driver   │  │            │   ┌─────────────┐ │  │
+│  │  │  Monitor   │  └────────────┘   │  Coverage   │ │  │
+│  │  └────────────┘                   └─────────────┘ │  │
+│  └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                            │
+                    ┌───────▼────────┐
+                    │      DUT        │
+                    │ (Systolic Array)│
+                    └────────────────┘
 ```
 
-**参考模型（Reference Model）**
-使用C++/Python构建功能参考模型，计算期望结果：
-```python
-def systolic_reference(A, B, W, H, K):
-    # A: [H, K], B: [K, W]
-    C = np.zeros((H, W))
-    for h in range(H):
-        for w in range(W):
-            for k in range(K):
-                C[h][w] += A[h][k] * B[k][w]
-    return C
+**关键验证组件详解**
+
+1. **Sequence与Sequencer**
+   
+   Sequence负责生成有意义的测试激励序列：
+   ```systemverilog
+   class gemm_sequence extends uvm_sequence#(gemm_transaction);
+     rand int unsigned m, k, n;
+     rand data_pattern_e pattern;
+     
+     constraint dims_c {
+       m inside {[1:1024]};
+       k inside {[1:1024]};
+       n inside {[1:1024]};
+       // 权重分布控制
+       m dist {32:=10, 64:=20, 128:=30, 256:=20, [1:31]:=10, [257:1024]:=10};
+     }
+     
+     task body();
+       gemm_transaction tr;
+       tr = gemm_transaction::type_id::create("tr");
+       
+       // 配置事务
+       start_item(tr);
+       assert(tr.randomize() with {
+         tr.m == local::m;
+         tr.k == local::k;
+         tr.n == local::n;
+         tr.pattern == local::pattern;
+       });
+       finish_item(tr);
+     endtask
+   endclass
+   ```
+
+2. **Driver组件**
+   
+   Driver将高层事务转换为管脚级信号：
+   ```systemverilog
+   class systolic_driver extends uvm_driver#(gemm_transaction);
+     virtual systolic_if vif;
+     
+     task run_phase(uvm_phase phase);
+       forever begin
+         seq_item_port.get_next_item(req);
+         drive_transaction(req);
+         seq_item_port.item_done();
+       end
+     endtask
+     
+     task drive_transaction(gemm_transaction tr);
+       // 配置阶段
+       vif.config_m <= tr.m;
+       vif.config_k <= tr.k;
+       vif.config_n <= tr.n;
+       vif.config_valid <= 1'b1;
+       @(posedge vif.clk);
+       vif.config_valid <= 1'b0;
+       
+       // 权重加载
+       for(int i = 0; i < tr.k; i++) begin
+         for(int j = 0; j < tr.n; j++) begin
+           vif.weight_data <= tr.weight_matrix[i][j];
+           vif.weight_valid <= 1'b1;
+           @(posedge vif.clk);
+         end
+       end
+       vif.weight_valid <= 1'b0;
+       
+       // 输入数据注入（斜向注入模式）
+       fork
+         inject_input_data(tr);
+         collect_output_data(tr);
+       join
+     endtask
+   endclass
+   ```
+
+3. **Monitor组件**
+   
+   Monitor被动观察接口信号，收集事务信息：
+   ```systemverilog
+   class systolic_monitor extends uvm_monitor;
+     virtual systolic_if vif;
+     uvm_analysis_port#(output_transaction) ap;
+     
+     task run_phase(uvm_phase phase);
+       forever begin
+         output_transaction tr;
+         collect_output(tr);
+         ap.write(tr);  // 广播给scoreboard
+       end
+     endtask
+     
+     task collect_output(output output_transaction tr);
+       @(posedge vif.clk iff vif.output_valid);
+       tr.row = vif.output_row;
+       tr.col = vif.output_col;
+       tr.data = vif.output_data;
+       tr.timestamp = $time;
+     endtask
+   endclass
+   ```
+
+4. **Scoreboard组件**
+   
+   Scoreboard负责结果比对和正确性判断：
+   ```systemverilog
+   class systolic_scoreboard extends uvm_scoreboard;
+     uvm_tlm_analysis_fifo#(gemm_transaction) input_fifo;
+     uvm_tlm_analysis_fifo#(output_transaction) output_fifo;
+     
+     // 参考模型实例
+     systolic_reference_model ref_model;
+     
+     task run_phase(uvm_phase phase);
+       forever begin
+         gemm_transaction in_tr;
+         output_transaction out_tr;
+         
+         input_fifo.get(in_tr);
+         
+         // 调用参考模型
+         ref_model.compute(in_tr);
+         
+         // 收集所有输出并比对
+         repeat(in_tr.m * in_tr.n) begin
+           output_fifo.get(out_tr);
+           check_result(out_tr, ref_model.get_expected(out_tr.row, out_tr.col));
+         end
+       end
+     endtask
+     
+     function void check_result(output_transaction out_tr, real expected);
+       real error_margin = 0.001;  // 容错范围
+       
+       if(abs(out_tr.data - expected) > error_margin) begin
+         `uvm_error("MISMATCH", 
+           $sformatf("Output[%0d][%0d]: Expected %f, Got %f", 
+             out_tr.row, out_tr.col, expected, out_tr.data))
+       end else begin
+         `uvm_info("MATCH", 
+           $sformatf("Output[%0d][%0d] correct: %f", 
+             out_tr.row, out_tr.col, out_tr.data), UVM_HIGH)
+       end
+     endfunction
+   endclass
+   ```
+
+**参考模型实现策略**
+
+参考模型是验证的黄金标准，需要保证绝对正确性：
+
+1. **C++高性能参考模型**
+   ```cpp
+   class SystolicRefModel {
+   private:
+     int array_size;
+     bool weight_stationary;
+     float *weight_buffer;
+     
+   public:
+     void configure(int m, int k, int n, int p) {
+       this->m = m; this->k = k; this->n = n;
+       this->array_size = p;
+     }
+     
+     void compute_gemm(float* A, float* B, float* C) {
+       // 分块计算，模拟硬件行为
+       int m_tiles = (m + array_size - 1) / array_size;
+       int n_tiles = (n + array_size - 1) / array_size;
+       int k_tiles = (k + array_size - 1) / array_size;
+       
+       for(int mt = 0; mt < m_tiles; mt++) {
+         for(int nt = 0; nt < n_tiles; nt++) {
+           for(int kt = 0; kt < k_tiles; kt++) {
+             compute_tile(A, B, C, mt, nt, kt);
+           }
+         }
+       }
+     }
+     
+     void compute_tile(float* A, float* B, float* C, 
+                      int mt, int nt, int kt) {
+       int m_start = mt * array_size;
+       int n_start = nt * array_size;
+       int k_start = kt * array_size;
+       
+       int m_end = min(m_start + array_size, m);
+       int n_end = min(n_start + array_size, n);
+       int k_end = min(k_start + array_size, k);
+       
+       // 精确模拟脉动阵列计算顺序
+       for(int i = m_start; i < m_end; i++) {
+         for(int j = n_start; j < n_end; j++) {
+           for(int l = k_start; l < k_end; l++) {
+             C[i*n + j] += A[i*k + l] * B[l*n + j];
+           }
+         }
+       }
+     }
+   };
+   ```
+
+2. **Python快速原型参考模型**
+   ```python
+   import numpy as np
+   
+   class SystolicReference:
+       def __init__(self, array_size=32, dtype='float16'):
+           self.array_size = array_size
+           self.dtype = dtype
+           
+       def compute(self, A, B, weight_stationary=True):
+           """
+           计算矩阵乘法 C = A @ B
+           A: [M, K], B: [K, N]
+           """
+           M, K = A.shape
+           K2, N = B.shape
+           assert K == K2, "矩阵维度不匹配"
+           
+           # 转换数据类型模拟硬件
+           if self.dtype == 'nvfp4':
+               A = self.quantize_nvfp4(A)
+               B = self.quantize_nvfp4(B)
+           
+           # 分块计算
+           C = np.zeros((M, N), dtype=A.dtype)
+           P = self.array_size
+           
+           for m in range(0, M, P):
+               for n in range(0, N, P):
+                   for k in range(0, K, P):
+                       # 提取tile
+                       m_end = min(m + P, M)
+                       n_end = min(n + P, N)
+                       k_end = min(k + P, K)
+                       
+                       A_tile = A[m:m_end, k:k_end]
+                       B_tile = B[k:k_end, n:n_end]
+                       
+                       # 计算并累加
+                       C[m:m_end, n:n_end] += self.systolic_compute(
+                           A_tile, B_tile, weight_stationary
+                       )
+           
+           return C
+       
+       def systolic_compute(self, A_tile, B_tile, weight_stationary):
+           """模拟单个tile的脉动阵列计算"""
+           if weight_stationary:
+               # Weight-stationary数据流
+               return self.ws_dataflow(A_tile, B_tile)
+           else:
+               # Output-stationary数据流
+               return self.os_dataflow(A_tile, B_tile)
+       
+       def ws_dataflow(self, A, B):
+           """Weight-stationary精确时序模拟"""
+           M, K = A.shape
+           K2, N = B.shape
+           C = np.zeros((M, N))
+           
+           # 模拟逐周期计算
+           for cycle in range(M + K + N - 2):
+               for i in range(M):
+                   for j in range(N):
+                       # 计算数据到达时间
+                       k_idx = cycle - i - j
+                       if 0 <= k_idx < K:
+                           C[i, j] += A[i, k_idx] * B[k_idx, j]
+           
+           return C
+       
+       def quantize_nvfp4(self, x, bias=1):
+           """nvfp4量化模拟"""
+           # E2M1格式：1位符号，2位指数，1位尾数
+           sign = np.sign(x)
+           abs_x = np.abs(x)
+           
+           # 计算指数
+           exp = np.floor(np.log2(abs_x)) + bias
+           exp = np.clip(exp, 0, 3)  # 2位指数
+           
+           # 计算尾数
+           mantissa = abs_x / (2 ** (exp - bias)) - 1
+           mantissa = np.round(mantissa * 2) / 2  # 1位尾数
+           
+           # 重构数值
+           return sign * (1 + mantissa) * (2 ** (exp - bias))
+   ```
+
+**验证通信机制**
+
+UVM组件间通过TLM（Transaction Level Modeling）端口通信：
+
+1. **Analysis Port机制**
+   - 一对多广播通信
+   - Monitor向多个subscriber广播数据
+   - 用于覆盖率收集和结果检查
+
+2. **TLM FIFO**
+   - 组件间缓冲和同步
+   - 处理生产者-消费者速度不匹配
+   - 提供背压(backpressure)机制
+
+3. **Configuration Database**
+   - 全局配置参数管理
+   - 层次化配置覆盖
+   - 运行时参数调整
+
+**DPI-C接口集成**
+
+使用SystemVerilog DPI-C将C++参考模型集成到UVM环境：
+
+```systemverilog
+// DPI-C函数声明
+import "DPI-C" function void c_ref_model_init(int array_size);
+import "DPI-C" function void c_ref_model_compute(
+    input real A[], input real B[], 
+    output real C[], 
+    input int m, k, n
+);
+
+class dpi_reference_model extends uvm_object;
+  function new(string name = "dpi_reference_model");
+    super.new(name);
+    c_ref_model_init(32);  // 初始化32x32阵列
+  endfunction
+  
+  function void compute(gemm_transaction tr, ref real result[]);
+    real A[], B[], C[];
+    
+    // 展平矩阵数据
+    A = new[tr.m * tr.k];
+    B = new[tr.k * tr.n];
+    C = new[tr.m * tr.n];
+    
+    flatten_matrix(tr.A_matrix, A);
+    flatten_matrix(tr.B_matrix, B);
+    
+    // 调用C++模型
+    c_ref_model_compute(A, B, C, tr.m, tr.k, tr.n);
+    
+    // 重组结果
+    unflatten_matrix(C, result, tr.m, tr.n);
+  endfunction
+endclass
 ```
 
 ## 2. 性能验证
 
+性能验证是NPU设计中的关键环节，需要准确评估设计能否达到200 TOPS的目标性能。通过构建精确的性能模型、设置硬件计数器、分析性能瓶颈，我们可以在设计早期发现并解决性能问题。本节将详细介绍性能验证的方法学和实践技术。
+
 ### 2.1 Cycle-Accurate模拟器
 
-构建周期精确的性能模型，准确评估设计性能：
+构建周期精确的性能模型是评估脉动阵列性能的基础。模拟器需要精确建模硬件的每个周期行为，包括计算、存储访问、数据传输等所有影响性能的因素。
 
-**性能模型要素**
-- 流水线建模：每个流水级的延迟
-- 存储访问建模：SRAM读写延迟、bank冲突
-- 数据依赖建模：RAW、WAR、WAW hazards
-- 控制开销建模：配置时间、同步开销
+**性能模型架构**
 
-**关键性能指标**
+完整的Cycle-Accurate模拟器包含以下核心组件：
+
+```
+┌─────────────────────────────────────────────────┐
+│          Cycle-Accurate Simulator               │
+├─────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌──────────────┐         │
+│  │  Compute     │    │   Memory     │         │
+│  │  Model       │    │   Model      │         │
+│  │  - PE Array  │    │  - SRAM      │         │
+│  │  - Pipeline  │    │  - DRAM      │         │
+│  │  - Dataflow  │    │  - NoC       │         │
+│  └──────┬───────┘    └──────┬───────┘         │
+│         │                    │                  │
+│  ┌──────▼────────────────────▼──────┐         │
+│  │       Timing Model                │         │
+│  │  - Clock domains                  │         │
+│  │  - Synchronization                │         │
+│  │  - Pipeline stages                │         │
+│  └───────────────┬───────────────────┘         │
+│                  │                              │
+│  ┌───────────────▼───────────────────┐         │
+│  │     Performance Statistics        │         │
+│  │  - Cycle counts                   │         │
+│  │  - Utilization                    │         │
+│  │  - Bottleneck analysis            │         │
+│  └───────────────────────────────────┘         │
+└─────────────────────────────────────────────────┘
+```
+
+**计算模型精确建模**
+
+1. **PE阵列时序模型**
+
+对于$P \times P$的脉动阵列，需要精确建模每个PE的计算时序：
+
+```cpp
+class PEArrayModel {
+private:
+    int array_size;
+    int pipeline_depth;
+    vector<vector<PEState>> pe_states;
+    
+public:
+    struct PEState {
+        bool is_active;
+        int current_cycle;
+        float accumulator;
+        float weight_reg;
+        float input_reg;
+        float output_reg;
+    };
+    
+    void cycle_update() {
+        // 更新每个PE的状态
+        for(int i = 0; i < array_size; i++) {
+            for(int j = 0; j < array_size; j++) {
+                PEState& pe = pe_states[i][j];
+                
+                if(pe.is_active) {
+                    // MAC运算
+                    pe.accumulator += pe.weight_reg * pe.input_reg;
+                    
+                    // 数据传递（向右和向下）
+                    if(j < array_size - 1) {
+                        pe_states[i][j+1].input_reg = pe.input_reg;
+                    }
+                    if(i < array_size - 1) {
+                        pe_states[i+1][j].output_reg = pe.accumulator;
+                    }
+                }
+            }
+        }
+        
+        current_cycle++;
+    }
+    
+    int compute_latency(int M, int K, int N) {
+        // 计算总延迟
+        int num_m_tiles = (M + array_size - 1) / array_size;
+        int num_n_tiles = (N + array_size - 1) / array_size;
+        int num_k_tiles = (K + array_size - 1) / array_size;
+        
+        int cycles_per_tile = array_size * num_k_tiles;
+        int pipeline_fill = 2 * array_size - 1;
+        int pipeline_drain = array_size - 1;
+        
+        int total_cycles = num_m_tiles * num_n_tiles * 
+                          (cycles_per_tile + pipeline_fill + pipeline_drain);
+        
+        return total_cycles;
+    }
+};
+```
+
+2. **流水线深度影响分析**
+
+脉动阵列的流水线深度直接影响性能：
+
+```
+流水线阶段分析：
+Stage 1: 指令译码 (1 cycle)
+Stage 2: 地址计算 (1 cycle)  
+Stage 3: 存储读取 (2-3 cycles, 取决于bank冲突)
+Stage 4: 数据对齐 (1 cycle)
+Stage 5: PE计算 (1 cycle MAC)
+Stage 6: 累加更新 (1 cycle)
+Stage 7: 结果写回 (2-3 cycles)
+
+总流水线深度: 9-11 cycles
+```
+
+对性能的影响：
+- 首个输出延迟：$T_{first} = Pipeline_{depth} + 2P - 1$
+- 稳态吞吐量：不受流水线深度影响
+- 短矩阵惩罚：当$K < Pipeline_{depth}$时，效率急剧下降
+
+**存储系统建模**
+
+1. **多级存储层次时序**
+
+```cpp
+class MemoryHierarchy {
+private:
+    struct CacheLevel {
+        int size_kb;
+        int latency_cycles;
+        int bandwidth_gbps;
+        float hit_rate;
+    };
+    
+    vector<CacheLevel> levels = {
+        {32,    1,   2048, 0.95},  // L0: PE本地寄存器
+        {256,   3,   1024, 0.85},  // L1: Tile SRAM
+        {4096,  10,  512,  0.75},  // L2: Global SRAM
+        {32768, 100, 256,  1.0}    // L3: HBM/DDR
+    };
+    
+public:
+    int access_latency(int address, int size) {
+        int total_latency = 0;
+        
+        for(auto& level : levels) {
+            if(random() < level.hit_rate) {
+                // 命中当前级别
+                int transfer_cycles = (size * 8) / 
+                    (level.bandwidth_gbps * 1e9 / CLOCK_FREQ);
+                total_latency = level.latency_cycles + transfer_cycles;
+                break;
+            }
+            // 未命中，继续下一级
+            total_latency += level.latency_cycles;
+        }
+        
+        return total_latency;
+    }
+    
+    void model_prefetch(int stride, int count) {
+        // 预取建模
+        for(int i = 0; i < count; i++) {
+            int addr = base_addr + i * stride;
+            prefetch_queue.push(addr);
+        }
+    }
+};
+```
+
+2. **Bank冲突建模**
+
+SRAM bank冲突对性能影响显著：
+
+```cpp
+class SRAMBankModel {
+    static const int NUM_BANKS = 16;
+    static const int BANK_WIDTH = 256;  // bits
+    
+    struct BankState {
+        bool is_busy;
+        int busy_until_cycle;
+        queue<AccessRequest> pending_requests;
+    };
+    
+    BankState banks[NUM_BANKS];
+    
+    int schedule_access(int address, int cycle) {
+        int bank_id = (address / BANK_WIDTH) % NUM_BANKS;
+        BankState& bank = banks[bank_id];
+        
+        if(bank.busy_until_cycle <= cycle) {
+            // 无冲突
+            bank.busy_until_cycle = cycle + 1;
+            return cycle;
+        } else {
+            // Bank冲突，需要等待
+            int actual_cycle = bank.busy_until_cycle;
+            bank.busy_until_cycle = actual_cycle + 1;
+            conflict_count++;
+            return actual_cycle;
+        }
+    }
+};
+```
+
+**数据流模式建模**
+
+不同的数据流模式对性能有显著影响：
+
+1. **Weight-Stationary (WS)**
+```
+优点：权重复用最大化，减少权重加载开销
+缺点：输入/输出数据流动开销大
+
+性能模型：
+T_ws = T_weight_load + T_compute + T_output_collect
+其中：
+- T_weight_load = P × (K/P) = K cycles
+- T_compute = M × N / P² × K cycles  
+- T_output_collect = M × N cycles
+```
+
+2. **Output-Stationary (OS)**
+```
+优点：部分和保持在PE本地，减少累加开销
+缺点：权重和输入都需要流动
+
+性能模型：
+T_os = T_init + T_compute + T_writeback
+其中：
+- T_init = M × N / P² cycles
+- T_compute = K × max(M/P, N/P) cycles
+- T_writeback = M × N / P² cycles
+```
+
+3. **Row-Stationary (RS)**
+```
+优点：平衡各种数据复用
+缺点：控制复杂度高
+
+性能模型需要考虑行级数据驻留：
+T_rs = Σ(T_row_compute[i]) for i in [0, M/P)
+```
+
+**关键性能指标计算**
 
 对于矩阵乘法 $C_{M \times N} = A_{M \times K} \times B_{K \times N}$：
 
-理论计算量：$2MKN$ FLOPs
+1. **理论性能上界**
 
-理论执行时间（理想情况）：
-$$T_{ideal} = \frac{MKN}{P^2} + (M + N + K - 3)$$
+理论计算量：$OPS = 2MKN$ (MAC算2个操作)
 
-其中$P$是阵列维度，第二项是流水线填充/排空开销。
+理论峰值性能：$TOPS_{peak} = P^2 \times f_{clock} \times 2 \times 10^{-12}$
 
-实际执行时间：
-$$T_{actual} = T_{compute} + T_{memory} + T_{control}$$
+对于200 TOPS目标，$32 \times 32$阵列：
+$$f_{clock} = \frac{200 \times 10^{12}}{32^2 \times 2} = 97.7 \text{ GHz}$$
 
-计算效率：
-$$\eta = \frac{T_{ideal}}{T_{actual}} \times 100\%$$
+显然不现实，因此需要多个阵列或更大阵列。
+
+2. **实际执行时间建模**
+
+$$T_{actual} = T_{compute} + T_{memory} + T_{control} + T_{sync}$$
+
+其中：
+- $T_{compute} = \lceil \frac{M}{P} \rceil \times \lceil \frac{K}{P} \rceil \times \lceil \frac{N}{P} \rceil \times P$
+- $T_{memory} = T_{load\_A} + T_{load\_B} + T_{store\_C}$
+- $T_{control} = T_{config} + T_{schedule}$
+- $T_{sync} = T_{barrier} \times num\_syncs$
+
+3. **有效利用率计算**
+
+```
+PE利用率：
+η_PE = 实际活跃PE周期数 / (P² × 总周期数)
+
+对于非对齐矩阵：
+- M=100, K=100, N=100, P=32
+- 需要4×4×4=64个tiles
+- 每个tile利用率：(100%32)²/32² = 4²/32² = 1.56%
+- 整体利用率很低！
+```
+
+4. **算术强度与Roofline分析**
+
+算术强度定义：
+$$AI = \frac{计算量}{数据传输量} = \frac{2MKN}{(MK + KN + MN) \times sizeof(dtype)}$$
+
+不同矩阵规模的AI值：
+- 小矩阵 (64×64×64): AI ≈ 21.3 FLOPs/Byte
+- 中矩阵 (256×256×256): AI ≈ 85.3 FLOPs/Byte  
+- 大矩阵 (1024×1024×1024): AI ≈ 341.3 FLOPs/Byte
+
+Roofline转折点：
+$$AI_{balance} = \frac{峰值算力}{存储带宽} = \frac{200 \text{ TFLOPS}}{256 \text{ GB/s}} = 781 \text{ FLOPs/Byte}$$
+
+大部分实际工作负载都是存储受限！
 
 ### 2.2 性能计数器设计
 
