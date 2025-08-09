@@ -724,7 +724,7 @@ $$\text{Speedup} = \frac{1}{(1-h) + \frac{h}{1+\alpha \times p}}$$
 
 ## 4.4 片上网络(NoC)基础
 
-片上网络是NPU内部各计算单元、存储单元和I/O接口之间的通信基础设施。良好的NoC设计对于实现高效的数据流和低延迟通信至关重要。
+片上网络是NPU内部各计算单元、存储单元和I/O接口之间的通信基础设施。良好的NoC设计对于实现高效的数据流和低延迟通信至关重要。在200 TOPS级别的NPU设计中，NoC需要提供数百TB/s的聚合带宽，同时保持纳秒级的延迟。
 
 ### 4.4.1 NoC拓扑结构
 
@@ -739,21 +739,87 @@ $$\text{Speedup} = \frac{1}{(1-h) + \frac{h}{1+\alpha \times p}}$$
                     └──┘  └──┘        ├──┼──┼──┤
                                       │  │  │  │
                                       └──┴──┴──┘
+
+Torus(环面):        Fat Tree(胖树):     Crossbar(交叉开关):
+┌──┬──┬──┐         ╱─┴─╲               ┌─┬─┬─┬─┐
+│╲ │╱ │╲ │         ╱     ╲              ├─┼─┼─┼─┤
+├──┼──┼──┤        ┌─┐   ┌─┐            ├─┼─┼─┼─┤
+│╱ │╲ │╱ │        │ │   │ │            ├─┼─┼─┼─┤
+├──┼──┼──┤        └┬┘   └┬┘            └─┴─┴─┴─┘
+│╲ │╱ │╲ │         │     │
+└──┴──┴──┘        PE    PE
 ```
 
 性能特征比较：
-| 拓扑 | 直径 | 分割带宽 | 成本 | 扩展性 |
-|------|------|----------|------|--------|
-| 总线 | 1 | O(1) | 低 | 差 |
-| 环形 | N/2 | O(2) | 低 | 中 |
-| 2D网格 | 2√N | O(√N) | 中 | 好 |
-| Torus | √N | O(2√N) | 高 | 好 |
-| 胖树 | logN | O(N) | 高 | 优秀 |
+| 拓扑 | 直径 | 分割带宽 | 成本 | 扩展性 | 功耗复杂度 |
+|------|------|----------|------|--------|------------|
+| 总线 | 1 | O(1) | 低 | 差 | O(N) |
+| 环形 | N/2 | O(2) | 低 | 中 | O(N) |
+| 2D网格 | 2√N | O(√N) | 中 | 好 | O(N) |
+| Torus | √N | O(2√N) | 高 | 好 | O(N) |
+| 胖树 | logN | O(N) | 高 | 优秀 | O(NlogN) |
+| Crossbar | 1 | O(N) | 极高 | 差 | O(N²) |
 
-对于200 TOPS的NPU，典型选择16×16的2D Mesh，提供：
-- 256个节点
+**拓扑选择的定量分析**
+
+对于200 TOPS的NPU设计，需要支持：
+- 计算单元：256-1024个MAC阵列
+- 存储带宽：240 TB/s（内部）
+- 节点间通信：~50 TB/s
+
+拓扑选择的约束条件：
+$$\text{Cost} = \alpha \times N_{routers} + \beta \times N_{links} + \gamma \times \text{Wire\_length}$$
+
+其中：
+- $N_{routers} = N$（节点数）
+- $N_{links} = k \times N / 2$（k为节点度数）
+- Wire_length取决于拓扑和物理布局
+
+以16×16 2D Mesh为例的详细分析：
+- 节点数：256
+- 链路数：480（内部） + 64（边界）
 - 最大跳数：30
-- 分割带宽：16×链路带宽
+- 平均跳数：10.67
+- 分割带宽：16 × 单链路带宽
+
+若每条链路32位宽，运行在2GHz，则：
+$$BW_{link} = 32 \text{ bits} \times 2 \text{ GHz} = 8 \text{ GB/s}$$
+$$BW_{bisection} = 16 \times 8 = 128 \text{ GB/s}$$
+
+**层次化NoC设计**
+
+现代NPU通常采用层次化NoC，结合多种拓扑：
+
+```
+全局NoC (2D Mesh)
+    │
+├───┼───────────┐
+│   │           │
+▼   ▼           ▼
+局部集群       局部集群
+(Crossbar)     (Ring)
+│   │          │   │
+PE  PE        PE  PE
+```
+
+层次化设计的优势：
+1. 局部通信低延迟（1-2 cycles）
+2. 全局通信高带宽
+3. 功耗优化（局部通信功耗低）
+4. 面积效率（减少长距离布线）
+
+**拓扑的物理实现考虑**
+
+在7nm工艺下的布线资源：
+- Metal层数：15-17层
+- 低层金属（M1-M4）：局部互连，间距45-56nm
+- 中层金属（M5-M8）：中等距离，间距80-100nm  
+- 高层金属（M9-M15）：全局布线，间距200-360nm
+
+2D Mesh的物理布局优化：
+1. 折叠布局：减少最长线延迟
+2. 对角线增强：添加对角链路减少跳数
+3. Express通道：跨多跳的快速通道
 
 ### 4.4.2 路由算法与流控
 
@@ -784,13 +850,54 @@ def xy_routing(src_x, src_y, dst_x, dst_y):
     return path
 ```
 
+XY路由的死锁避免证明：
+- 通道依赖图(CDG)无环
+- 东西向通道优先级高于南北向
+- 不会形成循环等待
+
 **自适应路由**
 
 根据网络拥塞动态选择路径：
 
 $$P_{route} = \arg\min_{p \in \text{paths}} \sum_{l \in p} C_l$$
 
-其中$C_l$是链路$l$的拥塞度量。
+其中$C_l$是链路$l$的拥塞度量，可定义为：
+$$C_l = \alpha \times Q_l + \beta \times U_l + \gamma \times D_l$$
+
+- $Q_l$：链路$l$的队列占用率
+- $U_l$：链路利用率（过去N周期平均）
+- $D_l$：链路传输延迟
+- $\alpha, \beta, \gamma$：权重系数
+
+**部分自适应路由算法**
+
+1. West-First路由：先向西，然后自适应选择
+2. North-Last路由：最后向北，之前自适应
+3. Odd-Even路由：奇偶列采用不同限制
+
+Odd-Even路由规则：
+- 偶数列：禁止E→N和E→S转向
+- 奇数列：禁止N→W和S→W转向
+
+这保证了无死锁同时提供路径多样性。
+
+**容错路由**
+
+处理故障节点和链路的路由策略：
+
+```
+故障节点绕行示例：
+┌──┬──┬──┐
+│  │  │  │
+├──┼XX┼──┤  XX: 故障节点
+│  │↗↘│  │  绕行路径：→↗→
+├──┴──┴──┤            →↘→
+```
+
+容错路由的实现：
+1. 故障表维护：每个路由器维护邻居状态
+2. 动态重路由：检测到故障后更新路由表
+3. 多路径冗余：预先计算备用路径
 
 **虚通道(Virtual Channel)**
 
@@ -799,10 +906,10 @@ $$P_{route} = \arg\min_{p \in \text{paths}} \sum_{l \in p} C_l$$
 ```
 物理链路
 ┌─────────────────────┐
-│  VC0: [████    ]    │
-│  VC1: [  ████  ]    │
-│  VC2: [      ████]  │
-│  VC3: [██      ]    │
+│  VC0: [████    ]    │  请求消息
+│  VC1: [  ████  ]    │  响应消息
+│  VC2: [      ████]  │  多播消息
+│  VC3: [██      ]    │  逃逸通道
 └─────────────────────┘
 ```
 
@@ -810,6 +917,38 @@ $$P_{route} = \arg\min_{p \in \text{paths}} \sum_{l \in p} C_l$$
 - 静态分配：不同消息类型使用固定VC
 - 动态分配：基于信用的VC分配
 - 逃逸通道：保留一个VC用于死锁恢复
+
+**虚通道的硬件实现**
+
+```
+输入端口结构：
+         ┌──────────────┐
+输入 ──> │ VC Demux     │
+         ├──────────────┤
+         │ VC0 Buffer   │
+         ├──────────────┤
+         │ VC1 Buffer   │
+         ├──────────────┤
+         │ VC2 Buffer   │
+         ├──────────────┤
+         │ VC3 Buffer   │
+         ├──────────────┤
+         │ VC Allocator │
+         ├──────────────┤
+         │ Switch Alloc │
+         └──────────────┘
+                │
+              交叉开关
+```
+
+VC分配的两阶段过程：
+1. VC分配阶段：为包头flit分配输出VC
+2. 开关分配阶段：为数据flit分配交叉开关时隙
+
+分配器的仲裁算法：
+- iSLIP：迭代轮询匹配
+- PIM：并行迭代匹配
+- 波前仲裁：对角线扫描
 
 ### 4.4.3 流控机制
 
@@ -821,12 +960,37 @@ $$P_{route} = \arg\min_{p \in \text{paths}} \sum_{l \in p} C_l$$
 发送方                     接收方
 ┌──────┐                 ┌──────┐
 │Buffer│ ──data(3 flits)─> │Buffer│
-│      │ <──credit(3)──── │      │
+│Count │ <──credit(3)──── │Free  │
+│=N-3  │                 │=3    │
 └──────┘                 └──────┘
 ```
 
-信用计算：
-$$\text{Credits} = \lceil \frac{\text{RTT} \times BW}{\text{flit\_size}} \rceil + \text{buffer\_depth}$$
+信用计算的详细推导：
+$$\text{Credits}_{min} = \lceil \frac{\text{RTT} \times BW}{\text{flit\_size}} \rceil + \text{buffer\_depth}$$
+
+其中RTT (Round-Trip Time)包括：
+- 前向延迟：$T_{fwd} = T_{router} + T_{link} + T_{deserialize}$
+- 信用返回延迟：$T_{credit} = T_{process} + T_{link\_back}$
+- 总RTT = $T_{fwd} + T_{credit}$
+
+对于2GHz时钟，128位flit的系统：
+- RTT = 8 cycles（典型值）
+- 链路带宽 = 256 Gbps
+- 最小信用数 = $\lceil \frac{8 \times 256}{128} \rceil = 16$
+
+**On/Off流控**
+
+更简单但效率较低的流控机制：
+
+```
+时序图：
+发送方: |--Send--|--Wait--|--Send--|
+接收方: |--Recv--|--OFF----|--ON----|
+```
+
+On/Off流控的阈值设置：
+- OFF阈值：$T_{off} = B_{total} - \text{RTT} \times \text{Rate}$
+- ON阈值：$T_{on} = T_{off} / 2$（避免频繁切换）
 
 **背压机制(Backpressure)**
 
@@ -834,43 +998,699 @@ $$\text{Credits} = \lceil \frac{\text{RTT} \times BW}{\text{flit\_size}} \rceil 
 
 $$\text{Throughput} = \min_{i \in \text{path}}(\text{capacity}_i \times (1 - \text{congestion}_i))$$
 
+背压传播模型：
+$$P_{stop}(t+1, n) = \begin{cases}
+1 & \text{if } Q_n(t) > T_{high} \\
+P_{stop}(t, n+1) & \text{if } Q_n(t) > T_{mid} \\
+0 & \text{otherwise}
+\end{cases}$$
+
+其中$Q_n(t)$是节点$n$在时刻$t$的队列占用。
+
+**弹性缓冲流控(Elastic Buffer)**
+
+利用流水线寄存器作为分布式缓冲：
+
+```
+┌──┐  ┌──┐  ┌──┐  ┌──┐
+│R1│──│R2│──│R3│──│R4│  弹性流水线
+└──┘  └──┘  └──┘  └──┘
+ ↓     ↓     ↓     ↓
+Valid & Ready握手
+```
+
+优势：
+- 降低缓冲需求
+- 减少面积开销
+- 提高时钟频率
+
 ### 4.4.4 NoC性能建模
 
 **延迟模型**
 
-端到端延迟包含多个组成部分：
+端到端延迟的精确建模：
 
-$$L_{total} = L_{header} + L_{router} \times H + L_{link} \times H + L_{contention}$$
+$$L_{total} = L_{header} + \sum_{i=1}^{H}(L_{router,i} + L_{link,i}) + L_{contention}$$
 
-其中：
-- $L_{header}$：包头处理延迟
-- $L_{router}$：单跳路由延迟（2-4 cycles）
-- $L_{link}$：链路传输延迟（1 cycle）
-- $H$：跳数
-- $L_{contention}$：竞争延迟
+各组件延迟分解：
+1. 路由器延迟（4级流水线）：
+   - 路由计算(RC)：1 cycle
+   - VC分配(VA)：1 cycle  
+   - 开关分配(SA)：1 cycle
+   - 交叉开关传输(ST)：1 cycle
+
+2. 链路延迟：
+   $$L_{link} = \lceil \frac{d}{v_{signal}} \times f_{clk} \rceil$$
+   其中$v_{signal} \approx 0.5c$（硅中信号速度）
+
+3. 竞争延迟（排队理论）：
+   $$L_{contention} = \frac{1}{\mu - \lambda}$$
+   其中$\mu$是服务率，$\lambda$是到达率。
 
 **带宽模型**
 
-有效带宽受多个因素影响：
+有效带宽的详细分析：
 
-$$BW_{effective} = BW_{physical} \times \eta_{protocol} \times \eta_{routing} \times (1 - P_{conflict})$$
+$$BW_{effective} = BW_{physical} \times \eta_{total}$$
 
-典型效率值：
-- $\eta_{protocol}$：0.8-0.9（协议开销）
-- $\eta_{routing}$：0.7-0.85（路由效率）
-- $P_{conflict}$：0.1-0.3（冲突概率）
+其中：
+$$\eta_{total} = \eta_{protocol} \times \eta_{routing} \times \eta_{congestion} \times \eta_{serialization}$$
+
+各效率因子：
+- $\eta_{protocol} = \frac{\text{payload\_size}}{\text{packet\_size}}$（典型0.8-0.9）
+- $\eta_{routing} = 1 - P_{misroute}$（典型0.85-0.95）
+- $\eta_{congestion} = (1 - \rho)^2$（$\rho$是网络负载）
+- $\eta_{serialization} = \frac{W_{flit}}{W_{phit}}$（flit到phit的转换效率）
+
+**热点和拥塞建模**
+
+热点形成的概率模型：
+$$P_{hotspot} = 1 - (1 - p)^N$$
+
+其中$p$是单个节点成为热点的概率，$N$是节点数。
+
+拥塞扩散模型（基于流体动力学）：
+$$\frac{\partial \rho}{\partial t} + \nabla \cdot (\rho \mathbf{v}) = S$$
+
+其中：
+- $\rho$：流量密度
+- $\mathbf{v}$：流速向量
+- $S$：源项（注入/移除流量）
 
 **实际案例：Google TPU v4的ICI**
 
 TPU v4使用3D Torus拓扑的Inter-Chip Interconnect (ICI)：
-- 4096个芯片互连
-- 每芯片6个100 Gbps链路
-- 总分割带宽：4.8 Tbps
-- 平均延迟：< 5μs
-- 支持全规约带宽：340 GB/s
 
-优化技术：
-1. 自适应路由避免热点
-2. 多轨道减少冲突
-3. 硬件集合通信原语
-4. 拥塞感知的流调度
+架构参数：
+- 4096个芯片（64×64 2D Torus）
+- 每芯片6个100 Gbps光链路
+- 总分割带宽：4.8 Tbps
+- 平均跳数：32（理论）、38（实际，含拥塞）
+- 单跳延迟：50ns
+- 端到端延迟：< 2μs（轻载）、< 5μs（重载）
+
+关键优化技术：
+
+1. **自适应路由避免热点**
+   - 基于全局拥塞表的路由决策
+   - 每100μs更新一次拥塞信息
+   - 减少热点概率80%
+
+2. **多轨道(Multi-rail)设计**
+   - 6条独立物理通道
+   - 不同流量类型分配到不同轨道
+   - 有效带宽提升4.5倍
+
+3. **硬件集合通信原语**
+   - AllReduce：340 GB/s（4096节点）
+   - AllGather：450 GB/s
+   - Reduce-Scatter：380 GB/s
+   - 相比软件实现加速10-20倍
+
+4. **拥塞感知的流调度**
+   - ECN (Explicit Congestion Notification)标记
+   - 自适应注入率控制
+   - 优先级反转避免饥饿
+
+性能测试结果（BERT-Large训练）：
+- 通信效率：92%（通信时间/计算时间）
+- 扩展效率：85%（4096芯片相对单芯片）
+- 能效：15 TFLOPS/W（含通信）
+
+## 本章小结
+
+本章深入探讨了NPU存储系统与数据流设计的核心概念。我们从存储层次设计出发，分析了片上SRAM、HBM和DDR的技术特征与权衡，通过定量计算确定了200 TOPS NPU所需的240 TB/s内部带宽。在数据重用模式部分，我们对比了时间重用与空间重用，详细分析了WS/OS/RS三种数据流的能效特征。DMA设计章节介绍了多通道DMA架构、描述符管理和预取策略，展示了如何通过双缓冲实现计算与传输的重叠。最后，我们深入研究了片上网络的拓扑结构、路由算法和流控机制，并以TPU v4的ICI为例说明了大规模互连的实际实现。
+
+关键要点：
+1. 存储带宽是NPU性能的主要瓶颈，需要通过多级存储层次和数据重用来缓解
+2. 数据流模式的选择直接影响能效，RS数据流通过灵活切换达到最优
+3. DMA预取深度需要根据内存延迟和计算吞吐量精确计算
+4. NoC设计需要在延迟、带宽和成本间权衡，2D Mesh是主流选择
+5. 虚通道和信用流控是避免死锁和提高利用率的关键机制
+
+关键公式回顾：
+- Roofline平衡点：$AI_{balance} = \frac{\text{Peak\_FLOPS}}{\text{Memory\_BW}}$
+- 时间重用度：$R_t = \frac{\text{使用次数}}{\text{加载次数}}$
+- 最优tile大小：$T_{opt} = \sqrt{\frac{S \times \rho \times f_{clk}}{3 \times BW}}$
+- NoC端到端延迟：$L_{total} = L_{header} + L_{router} \times H + L_{link} \times H + L_{contention}$
+- 信用流控：$Credits_{min} = \lceil \frac{RTT \times BW}{flit\_size} \rceil + buffer\_depth$
+
+## 练习题
+
+### 基础题
+
+**练习4.1** 计算存储带宽需求
+一个NPU需要执行矩阵乘法 $C_{512×512} = A_{512×768} \times B_{768×512}$，采用nvfp4量化。若计算吞吐量为100 TOPS，MAC利用率80%，计算：
+a) 无数据重用时的理论带宽需求
+b) 采用Output Stationary数据流的带宽需求
+c) 若片上SRAM仅32MB，设计合理的tiling策略
+
+<details>
+<summary>提示</summary>
+考虑计算量与数据传输量的比值，注意nvfp4为4位数据类型。对于tiling，需要满足三个矩阵块都能装入SRAM。
+</details>
+
+<details>
+<summary>答案</summary>
+
+a) 无数据重用时：
+- 计算量：$2 \times 512 \times 768 \times 512 = 402.7M$ FLOPs
+- 数据量：$(512×768 + 768×512 + 512×512) \times 4 \text{ bits} = 4.19M$ bytes
+- 算术强度：$\frac{402.7M}{4.19M} = 96$ FLOPs/byte
+- 带宽需求：$\frac{100 \text{ TOPS} \times 0.8}{96} = 833$ GB/s
+
+b) Output Stationary：
+- 每个输出元素计算时，A的一行和B的一列各读取一次
+- 重用因子：K = 768
+- 带宽需求：$\frac{833 \text{ GB/s}}{768/3} = 3.25$ GB/s
+
+c) Tiling策略：
+- 设tile大小为 $T_M × T_K × T_N$
+- 约束：$(T_M × T_K + T_K × T_N + T_M × T_N) × 4 \text{ bits} \leq 32 \text{ MB}$
+- 选择：$T_M = T_N = 128, T_K = 192$
+- 验证：$(128×192 + 192×128 + 128×128) × 0.5 = 32.25$ KB < 32 MB ✓
+</details>
+
+**练习4.2** Bank冲突分析
+一个NPU有16个SRAM bank，采用交织存储，地址映射为 $Bank_{id} = addr \bmod 16$。现需要同时访问地址0x1000、0x1010、0x1020、0x1030，问：
+a) 是否存在bank冲突？
+b) 若改为 $Bank_{id} = (addr >> 4) \bmod 16$，结果如何？
+c) 设计一个映射函数避免此类冲突
+
+<details>
+<summary>提示</summary>
+计算每个地址对应的bank编号，检查是否有重复。注意地址的二进制表示。
+</details>
+
+<details>
+<summary>答案</summary>
+
+a) 原始映射：
+- 0x1000 mod 16 = 0
+- 0x1010 mod 16 = 0  
+- 0x1020 mod 16 = 0
+- 0x1030 mod 16 = 0
+存在严重冲突，4个地址都映射到Bank 0
+
+b) 改进映射：
+- (0x1000 >> 4) mod 16 = 0x100 mod 16 = 0
+- (0x1010 >> 4) mod 16 = 0x101 mod 16 = 1
+- (0x1020 >> 4) mod 16 = 0x102 mod 16 = 2  
+- (0x1030 >> 4) mod 16 = 0x103 mod 16 = 3
+无冲突，分别映射到Bank 0,1,2,3
+
+c) 更好的映射函数（XOR哈希）：
+$Bank_{id} = ((addr >> 4) \oplus (addr >> 8)) \bmod 16$
+这样可以打散规律性访问模式
+</details>
+
+**练习4.3** DMA预取深度计算
+一个NPU系统的参数如下：
+- 计算一个256×256矩阵乘法tile需要500 cycles
+- HBM访问延迟：200 cycles
+- DMA传输256×256×4bits数据需要100 cycles
+计算最小预取深度以完全隐藏内存延迟。
+
+<details>
+<summary>提示</summary>
+考虑流水线执行，预取需要覆盖整个内存访问时间。
+</details>
+
+<details>
+<summary>答案</summary>
+
+总内存访问时间：200 + 100 = 300 cycles
+计算时间：500 cycles
+
+由于计算时间大于内存访问时间，理论上1级预取即可：
+- 时刻0-300：预取tile 1，计算tile 0
+- 时刻300-500：继续计算tile 0
+- 时刻500-800：预取tile 2，计算tile 1
+
+但考虑到可能的延迟变化，实际需要2级预取缓冲：
+$$N_{prefetch} = \lceil \frac{300}{500} \rceil + 1 = 2$$
+
+这样可以容忍最多500 cycles的延迟抖动。
+</details>
+
+### 挑战题
+
+**练习4.4** 多级存储优化
+设计一个三级存储系统用于Transformer的Attention计算（序列长度8192，头维度64）：
+- L1: 256KB per PE，延迟1 cycle
+- L2: 8MB shared，延迟10 cycles
+- HBM: 16GB，延迟100 cycles
+要求设计数据分块和调度策略，最小化总延迟。
+
+<details>
+<summary>提示</summary>
+Attention包含QK^T和Score×V两个大矩阵乘法，考虑Flash Attention的分块策略。
+</details>
+
+<details>
+<summary>答案</summary>
+
+采用Flash Attention分块策略：
+
+1. 外层循环：将8192序列分成32个块，每块256
+2. 中层循环：Q和K的块大小为256×64
+3. 内层循环：累加部分attention scores
+
+存储分配：
+- L1：当前Q块(256×64×4B = 64KB) + 部分K块(64KB) + 中间结果(128KB)
+- L2：预取下一个K/V块对 + Softmax归一化因子
+- HBM：完整Q、K、V矩阵
+
+调度策略：
+```
+for q_block in range(32):  # 外层
+    load Q[q_block] to L2
+    for kv_block in range(32):  # 中层  
+        prefetch K[kv_block+1], V[kv_block+1] to L2
+        load K[kv_block], V[kv_block] to L1
+        compute S = Q[q_block] @ K[kv_block].T  # 在L1
+        compute P = softmax(S)  # 在L1
+        compute O += P @ V[kv_block]  # 累加到L1
+    write O back to HBM
+```
+
+总延迟估算：
+- L1访问：32×32×256×64×2 = 33M次，33M cycles
+- L2访问：32×32×2 = 2K次，20K cycles  
+- HBM访问：32×3 = 96次，9.6K cycles
+- 计算：32×32×(256×256×64×2) = 8.6G FLOPs
+
+在100 GFLOPS的PE上，计算主导，总时间约86ms。
+</details>
+
+**练习4.5** NoC路由优化
+在8×8 2D Mesh上，从(0,0)发送数据到(7,7)，同时存在以下流量：
+- (0,7)→(7,0): 大流量
+- (3,3)→(4,4): 中等流量
+设计自适应路由策略避免拥塞。
+
+<details>
+<summary>提示</summary>
+分析XY路由的冲突点，考虑YX或部分自适应路由。
+</details>
+
+<details>
+<summary>答案</summary>
+
+XY路由分析：
+- (0,0)→(7,7): 路径(0,0)→(7,0)→(7,7)
+- (0,7)→(7,0): 路径(0,7)→(7,7)→(7,0)  
+- 冲突：两条路径在(7,0)-(7,7)段重叠
+
+自适应策略：
+1. 监测(7,*)行的拥塞
+2. 当拥塞度>阈值时，(0,0)→(7,7)改用YX路由：
+   (0,0)→(0,7)→(7,7)
+3. 中间节点(3,3)-(4,4)的流量较小，维持XY路由
+
+负载均衡算法：
+```python
+def adaptive_route(src, dst, congestion_map):
+    xy_path = compute_xy_path(src, dst)
+    yx_path = compute_yx_path(src, dst)
+    
+    xy_cost = sum(congestion_map[link] for link in xy_path)
+    yx_cost = sum(congestion_map[link] for link in yx_path)
+    
+    if yx_cost < 0.8 * xy_cost:  # 20%改善阈值
+        return yx_path
+    else:
+        return xy_path
+```
+
+预期改善：
+- 最大链路利用率从90%降至60%
+- 平均延迟减少35%
+- 吞吐量提升40%
+</details>
+
+**练习4.6** 数据流能效分析
+比较三种数据流(WS/OS/RS)在以下场景的能效：
+- 1×1卷积，输入224×224×128，输出224×224×256
+- 3×3 Depthwise卷积，224×224×256
+- 全连接层，输入2048，输出1000
+假设：RF访问1pJ，NoC传输5pJ，DRAM访问200pJ。
+
+<details>
+<summary>提示</summary>
+计算每种数据流的数据传输量和重用模式，估算总能耗。
+</details>
+
+<details>
+<summary>答案</summary>
+
+**1×1卷积分析：**
+
+WS (Weight Stationary):
+- 权重驻留：128×256 = 32K次RF访问
+- 输入流动：224×224×128 = 6.4M次NoC
+- 输出累加：224×224×256 = 12.8M次NoC
+- 能耗：32K×1 + 19.2M×5 = 96 mJ
+
+OS (Output Stationary):
+- 输出驻留：224×224×256 = 12.8M次RF访问
+- 权重广播：128×256×(224×224/PE数) 次NoC
+- 假设256个PE：128×256×196 = 6.4M次NoC
+- 输入广播：类似6.4M次NoC
+- 能耗：12.8M×1 + 12.8M×5 = 76.8 mJ
+
+RS (Row Stationary):
+- 1D卷积映射，每个PE处理部分输入输出
+- 本地RF：~8M次访问
+- NoC传输：~8M次
+- 能耗：8M×1 + 8M×5 = 48 mJ
+
+**3×3 Depthwise分析：**
+
+WS：不适用（无权重共享）
+
+OS：
+- 每个输出像素需要9个输入
+- RF：224×224×256 = 12.8M
+- NoC：224×224×256×9 = 115M
+- 能耗：12.8M×1 + 115M×5 = 587 mJ
+
+RS：
+- 每个PE处理一个通道
+- RF：224×224×256 = 12.8M  
+- NoC：最小（仅边界像素）~2M
+- 能耗：12.8M×1 + 2M×5 = 22.8 mJ
+
+**全连接层分析：**
+
+WS：
+- 权重驻留：2048×1000 = 2M次RF
+- 输入广播到所有PE
+- 能耗：2M×1 + 输入广播开销
+
+OS：
+- 输出驻留：1000次RF
+- 权重和输入流动
+- 能耗：取决于batch size
+
+RS：
+- 介于WS和OS之间
+- 能耗：~1.5× min(WS, OS)
+
+结论：
+- 1×1卷积：RS > OS > WS
+- Depthwise：RS >> OS (WS不适用)
+- 全连接：取决于batch size，通常WS较优
+</details>
+
+**练习4.7** 存储一致性设计
+设计一个支持多个计算集群共享SRAM的一致性协议，要求：
+- 支持原子读-改-写操作
+- 最小化同步开销
+- 避免死锁
+
+<details>
+<summary>提示</summary>
+考虑目录式或监听式协议，注意原子操作的实现。
+</details>
+
+<details>
+<summary>答案</summary>
+
+采用简化的MESI协议变体：
+
+状态定义：
+- M (Modified): 独占且已修改
+- E (Exclusive): 独占未修改
+- S (Shared): 共享只读
+- I (Invalid): 无效
+
+协议设计：
+1. 读操作：
+   - Invalid → Shared (广播读请求)
+   - Shared/Exclusive/Modified → 直接读
+
+2. 写操作：
+   - Invalid/Shared → Exclusive (广播失效)
+   - Exclusive → Modified (本地写)
+   - Modified → 直接写
+
+3. 原子操作(Atomic RMW)：
+   ```
+   acquire_lock(addr):
+     while True:
+       state = get_state(addr)
+       if state != Modified:
+         if try_upgrade_to_modified(addr):
+           break
+       backoff()
+   
+   atomic_add(addr, value):
+     acquire_lock(addr)
+     old = read(addr)
+     write(addr, old + value)
+     release_lock(addr)
+   ```
+
+死锁避免：
+1. 锁排序：按地址顺序获取
+2. 超时机制：等待超过阈值则回退
+3. 专用原子操作单元：避免与普通访问竞争
+
+硬件实现：
+- 目录表：2K entries，4-way组相联
+- 状态位：2 bits per cache line
+- 同步网络：专用低延迟网络
+- 原子单元：每个cluster一个，支持16个pending操作
+
+性能指标：
+- 读延迟：1-3 cycles (取决于状态)
+- 写延迟：3-10 cycles (需要失效)
+- 原子操作：10-20 cycles
+- 面积开销：< 5%总SRAM面积
+</details>
+
+**练习4.8** 端到端系统设计
+为自动驾驶BEV感知设计完整的存储和NoC系统：
+- 输入：6路相机，每路4MP@30fps
+- 网络：BEVFormer-Base
+- 实时性要求：< 100ms延迟
+给出详细的架构设计和带宽分配。
+
+<details>
+<summary>提示</summary>
+分析BEVFormer的计算和存储需求，设计pipeline确保实时性。
+</details>
+
+<details>
+<summary>答案</summary>
+
+**系统需求分析：**
+
+输入带宽：
+- 6 × 4MP × 30fps × 12bit = 10.8 Gbps
+
+BEVFormer计算：
+- Backbone (ResNet-50): 4 GFLOPS × 6 = 24 GFLOPS
+- Neck (FPN): 2 GFLOPS × 6 = 12 GFLOPS  
+- Transformer: 15 GFLOPS
+- Head: 3 GFLOPS
+- 总计：54 GFLOPS，需要540 TOPS@100ms
+
+存储需求：
+- 输入缓冲：6 × 4MP × 2 = 48 MB (双缓冲)
+- 特征图：~200 MB
+- BEV Query：100×100×256×4 = 10 MB
+- 模型权重：150 MB (INT8)
+- 历史特征：10帧 × 50 MB = 500 MB
+
+**架构设计：**
+
+```
+┌─────────────────────────────────┐
+│     相机接口 (6× MIPI CSI-2)     │
+└──────────┬──────────────────────┘
+           │ 10.8 Gbps
+    ┌──────▼──────────┐
+    │  输入缓冲SRAM   │ 48 MB
+    │   (双缓冲)      │
+    └──────┬──────────┘
+           │
+    ┌──────▼──────────────────────┐
+    │   2D Mesh NoC (16×16)       │
+    │   链路: 256 Gbps             │
+    │   总带宽: 4 Tbps             │
+    └──┬───────────────────────┬──┘
+       │                       │
+┌──────▼──────┐       ┌────────▼────────┐
+│ 计算集群×4  │       │  共享L2 SRAM    │
+│ 150 TOPS    │       │    128 MB       │
+│ L1: 8MB     │       └─────────────────┘
+└─────────────┘                │
+                               │
+                        ┌──────▼──────┐
+                        │  HBM3 16GB  │
+                        │  819 GB/s   │
+                        └─────────────┘
+```
+
+**流水线设计：**
+
+```
+Stage 1: 图像预处理 (10ms)
+- 6路并行处理
+- 畸变校正、归一化
+
+Stage 2: Backbone特征提取 (30ms)  
+- 6路CNN并行
+- 特征金字塔生成
+
+Stage 3: BEV转换 (20ms)
+- 3D→2D投影
+- 多尺度特征融合
+
+Stage 4: Temporal融合 (15ms)
+- 历史BEV特征对齐
+- 运动补偿
+
+Stage 5: Transformer (20ms)
+- Self-attention
+- Cross-attention with images
+
+Stage 6: 检测头 (5ms)
+- 3D框回归
+- 类别预测
+```
+
+**带宽分配：**
+
+1. 相机→输入缓冲：10.8 Gbps (持续)
+2. 输入缓冲→计算集群：50 GB/s (突发)
+3. 计算集群↔L2：200 GB/s
+4. L2↔HBM：100 GB/s (平均)
+5. NoC内部：500 GB/s (峰值)
+
+**优化策略：**
+
+1. 相机帧重叠：N+1帧预处理与N帧推理并行
+2. 特征缓存：重用backbone特征3帧
+3. 量化：INT8 backbone，FP16 transformer
+4. 稀疏化：attention mask剪枝50%
+5. 多分辨率：远处低分辨率，近处高分辨率
+
+**性能预期：**
+- 延迟：85ms (含预处理)
+- 吞吐量：11.7 fps
+- 功耗：45W
+- 能效：12 TOPS/W
+</details>
+
+## 常见陷阱与错误 (Gotchas)
+
+### 存储设计陷阱
+
+1. **带宽计算错误**
+   - 错误：只考虑计算带宽，忽略控制和同步开销
+   - 正确：预留20-30%带宽用于控制、同步和非理想因素
+
+2. **Bank冲突低估**
+   - 错误：假设均匀分布的访问模式
+   - 正确：分析实际访问模式，考虑stride访问造成的冲突
+
+3. **忽视数据对齐**
+   - 错误：任意的数据布局和tile大小
+   - 正确：确保数据对齐到缓存行边界，tile大小是SIMD宽度的倍数
+
+### 数据流设计陷阱
+
+4. **单一数据流策略**
+   - 错误：所有层使用相同的数据流
+   - 正确：根据层类型自适应切换数据流模式
+
+5. **重用机会错失**
+   - 错误：独立优化每个维度的重用
+   - 正确：联合优化时间和空间重用，考虑数据生命周期
+
+### DMA设计陷阱
+
+6. **预取距离不当**
+   - 错误：固定的预取距离
+   - 正确：根据计算时间和内存延迟动态调整
+
+7. **描述符链表死锁**
+   - 错误：循环依赖的描述符链
+   - 正确：确保描述符DAG无环，使用超时机制
+
+### NoC设计陷阱
+
+8. **路由死锁**
+   - 错误：自适应路由without escape channel
+   - 正确：保证至少一个虚通道使用确定性无死锁路由
+
+9. **热点忽视**
+   - 错误：假设均匀流量分布
+   - 正确：识别和处理同步点、规约操作造成的热点
+
+10. **信用泄露**
+    - 错误：信用计数器溢出或不匹配
+    - 正确：使用饱和计数器，定期同步信用
+
+## 最佳实践检查清单
+
+### 存储系统设计审查
+
+- [ ] **容量规划**
+  - [ ] 各级存储容量是否满足最大工作集需求？
+  - [ ] 是否为双缓冲预留了空间？
+  - [ ] 碎片化损失是否在可接受范围（<20%）？
+
+- [ ] **带宽匹配**
+  - [ ] 计算带宽与存储带宽是否平衡？
+  - [ ] 是否识别了带宽瓶颈？
+  - [ ] 峰值带宽需求是否有缓冲机制？
+
+- [ ] **访问模式优化**
+  - [ ] 是否分析了主要kernel的访问模式？
+  - [ ] Bank冲突率是否<5%？
+  - [ ] 是否实现了合适的交织策略？
+
+### 数据流优化审查
+
+- [ ] **重用最大化**
+  - [ ] 是否量化了各级数据重用率？
+  - [ ] Tiling参数是否经过优化？
+  - [ ] 是否考虑了融合执行机会？
+
+- [ ] **调度优化**
+  - [ ] 计算与数据传输是否充分重叠？
+  - [ ] 是否消除了不必要的数据移动？
+  - [ ] 关键路径是否已识别和优化？
+
+### DMA配置审查
+
+- [ ] **通道分配**
+  - [ ] DMA通道数是否充足？
+  - [ ] 优先级设置是否合理？
+  - [ ] 是否支持所需的传输模式？
+
+- [ ] **延迟隐藏**
+  - [ ] 预取深度是否充分？
+  - [ ] 双缓冲是否正确实现？
+  - [ ] 是否处理了内存延迟变化？
+
+### NoC验证审查
+
+- [ ] **功能正确性**
+  - [ ] 路由算法是否无死锁？
+  - [ ] 是否处理了所有边界情况？
+  - [ ] 容错机制是否完备？
+
+- [ ] **性能验证**
+  - [ ] 是否达到了目标带宽？
+  - [ ] 延迟是否满足要求？
+  - [ ] 负载均衡是否有效？
+
+- [ ] **扩展性**
+  - [ ] 是否支持目标规模？
+  - [ ] 扩展时性能下降是否可接受？
+  - [ ] 是否预留了升级接口？
