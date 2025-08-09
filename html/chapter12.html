@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="./">
+    <title>第12章：TSP编译器技术</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/highlight.css">
+    <script src="assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors', 'ams']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors', '[tex]/ams']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" id="sidebar-search-input" placeholder="搜索..." autocomplete="off">
+            </div>
+            <div id="tree-container">
+                <nav class="tree-nav" role="tree">
+                    <div class="tree-item " >
+                        <a href="index.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">NPU设计全流程教程：从算法到RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter1.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第1章：NPU设计导论</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter2.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第2章：算法与算子分析</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter3.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第3章：量化与稀疏化技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter4.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第4章：存储系统与数据流</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter5.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第5章：脉动阵列原理与设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter6.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第6章：脉动阵列RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter7.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第7章：TPU编译器与映射</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter8.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第8章：脉动阵列验证方法</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter9.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第9章：数据流架构原理</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter10.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第10章：TSP微架构设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter11.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第11章：数据流RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item active" >
+                        <a href="chapter12.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第12章：TSP编译器技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter13.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第13章：多核扩展与互连</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter14.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第14章：软硬件协同设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter15.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第15章：性能分析与优化</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter16.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第16章：工程实践与部署</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="CLAUDE.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">Untitled</span>
+                        </a>
+                    </div>
+                </nav>
+            </div>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="12tsp">第12章：TSP编译器技术</h1>
+<p>本章深入探讨Groq TSP（Tensor Streaming Processor）的编译器技术，重点关注静态调度、数据流图优化和自动并行化策略。TSP采用软件定义的确定性执行模型，通过编译时完成所有调度决策，消除运行时不确定性，这与传统GPU的动态调度形成鲜明对比。我们将分析如何通过编译器技术充分发挥数据流架构的优势，实现接近理论峰值的计算效率。</p>
+<p>TSP编译器的核心理念是"编译时间换运行时间"。通过在编译阶段进行精确的时序分析和资源调度，生成完全确定的执行序列，避免了运行时的调度开销和不确定性。这种方法特别适合批处理推理场景，能够保证稳定的延迟和最大的硬件利用率。</p>
+<h2 id="121">12.1 静态调度算法</h2>
+<p>TSP的静态调度是整个编译器的核心，它将计算图映射到硬件资源上，生成精确到时钟周期的执行计划。这种调度方式要求编译器对硬件的每个细节都有准确的建模，包括计算单元延迟、内存访问时序、片上网络传输时间等。</p>
+<p>静态调度的核心优势在于消除运行时不确定性。传统GPU依赖warp调度器动态分配计算资源，这带来了功耗开销和性能波动。TSP通过将所有调度决策前移到编译时，不仅节省了调度器硬件，还能保证确定的执行时间，这对于自动驾驶等安全关键应用尤为重要。每个指令都带有精确的发射时间戳，硬件只需按照预定时序执行，无需复杂的动态仲裁逻辑。</p>
+<p>静态调度的理论基础源于经典的编译器理论和并行计算模型。TSP采用的确定性执行模型可以追溯到VLIW（Very Long Instruction Word）架构，但相比传统VLIW，TSP的调度粒度更大，以张量操作而非标量指令为单位。这种粗粒度调度减少了调度复杂度，同时保持了足够的灵活性。编译器使用整数线性规划（ILP）和约束满足问题（CSP）求解器来寻找最优调度，在可接受的编译时间内获得接近理论最优的结果。</p>
+<h3 id="1211-tsp">12.1.1 TSP调度模型基础</h3>
+<p>TSP采用同步数据流（Synchronous Dataflow, SDF）模型作为调度的理论基础。在SDF模型中，每个计算节点的输入输出数据量在编译时已知，这使得编译器可以静态确定所有数据传输和计算的时序。</p>
+<p>SDF模型的关键特性是其可预测性。每个actor（计算节点）有固定的触发规则：当所有输入token（数据）就绪时，actor执行并产生固定数量的输出token。这种确定性使得编译器可以构建精确的执行时间表。例如，一个矩阵乘法节点需要两个输入矩阵，产生一个输出矩阵，数据量在编译时完全确定。编译器可以计算出该节点从接收输入到产生输出的精确时钟周期数，包括数据传输、计算和结果写回的所有阶段。</p>
+<p>与动态数据流模型相比，SDF牺牲了一定的灵活性（如不支持数据依赖的条件执行），但换来了完美的性能可预测性和零调度开销。这种权衡对于推理工作负载是合理的，因为神经网络推理的计算模式在部署后是固定的。</p>
+<p>调度问题可以形式化为一个约束优化问题：</p>
+<p>给定计算图 $G = (V, E)$，其中 $V$ 是计算节点集合，$E$ 是数据依赖边集合。对于每个节点 $v_i \in V$：</p>
+<ul>
+<li>计算时间：$t_{comp}(v_i)$</li>
+<li>输入数据量：$d_{in}(v_i)$</li>
+<li>输出数据量：$d_{out}(v_i)$</li>
+<li>资源需求：$r(v_i) = \{r_{alu}, r_{mem}, r_{noc}\}$</li>
+</ul>
+<p>调度目标是找到一个映射函数 $\phi: V \rightarrow (P, T)$，将每个节点映射到处理器 $P$ 和时间槽 $T$，使得：</p>
+<p>$$\min \max_{v_i \in V} \{T(v_i) + t_{comp}(v_i)\}$$
+约束条件包括：</p>
+<ol>
+<li><strong>依赖约束</strong>：$\forall (v_i, v_j) \in E: T(v_j) \geq T(v_i) + t_{comp}(v_i) + t_{comm}(v_i, v_j)$</li>
+<li><strong>资源约束</strong>：$\forall t, p: \sum_{v_i: T(v_i) = t, P(v_i) = p} r(v_i) \leq R_{available}(p)$</li>
+<li><strong>内存约束</strong>：$\forall t: \sum_{v_i: T(v_i) \leq t &lt; T(v_i) + t_{life}(v_i)} m(v_i) \leq M_{total}$</li>
+</ol>
+<p>其中 $t_{comm}(v_i, v_j)$ 是节点间通信时间，取决于数据量和网络拓扑：
+$$t_{comm}(v_i, v_j) = \frac{d_{out}(v_i)}{BW_{noc}} \times hop_distance(P(v_i), P(v_j))$$
+这个优化问题是NP-hard的，但TSP编译器通过多种启发式方法获得高质量的近似解。关键观察是神经网络的计算图通常具有规则的结构（如层级结构、重复模式），这些特性可以被利用来简化调度问题。例如，同一层的不同通道通常可以并行处理，残差连接形成的菱形结构有固定的调度模式。编译器维护一个模式库，对常见的子图结构使用预优化的调度方案，大大加速了编译过程。</p>
+<h3 id="1212">12.1.2 指令调度与资源分配</h3>
+<p>TSP的指令调度采用改进的列表调度（List Scheduling）算法，结合模拟退火（Simulated Annealing）进行优化。基本流程如下：</p>
+<p>指令调度的核心挑战在于平衡多个相互冲突的目标：最小化总执行时间、最大化硬件利用率、减少内存占用、降低通信开销。TSP编译器采用分层优化策略，先用启发式算法快速得到可行解，再通过元启发式算法迭代改进。这种两阶段方法既保证了编译速度，又能获得接近最优的调度质量。</p>
+<p><strong>阶段1：优先级计算</strong></p>
+<p>为每个节点计算调度优先级，考虑关键路径长度和资源使用。优先级计算不仅要考虑单个节点的特性，还要考虑其在整个计算图中的位置和影响。关键路径上的节点获得更高优先级，因为它们直接决定了程序的总执行时间。同时，资源密集型操作也需要优先调度，以避免后续的资源冲突：
+$$priority(v_i) = \alpha \cdot CP(v_i) + \beta \cdot \frac{r(v_i)}{R_{avg}} + \gamma \cdot fanout(v_i)$$
+其中：</p>
+<ul>
+<li>$CP(v_i)$ 是从节点 $v_i$ 到输出的最长路径</li>
+<li>$R_{avg}$ 是平均资源使用量</li>
+<li>$fanout(v_i)$ 是节点的扇出度</li>
+<li>$\alpha, \beta, \gamma$ 是权重系数，典型值为 $(0.5, 0.3, 0.2)$</li>
+</ul>
+<p><strong>阶段2：贪心调度</strong></p>
+<div class="codehilite"><pre><span></span><code>算法：TSP贪心调度
+
+1. 初始化ready_list为所有无前驱的节点
+2. while ready_list不为空:
+   3. 选择priority最高的节点v
+   4. 找到最早可用的时间槽t和处理器p
+   5. 检查资源约束：
+      <span class="k">-</span> ALU单元：每周期最多16个向量操作
+      <span class="k">-</span> 内存带宽：读写总带宽不超过2TB/s
+      <span class="k">-</span> NoC带宽：每个链路不超过400GB/s
+   6. 分配v到(p, t)
+   7. 更新ready_list
+</code></pre></div>
+
+<p>贪心调度的时间复杂度为 $O(|V|^2 \cdot P)$，其中 $|V|$ 是节点数，$P$ 是处理器数。为了加速调度，编译器使用增量式数据结构维护可用资源和就绪节点。例如，使用区间树（Interval Tree）跟踪每个处理器的空闲时间段，使用优先队列维护就绪节点，这些优化将实际复杂度降低到 $O(|V| \log |V| \cdot P)$。</p>
+<p><strong>阶段3：模拟退火优化</strong></p>
+<p>通过随机交换和移动操作优化初始调度：
+$$\Delta E = makespan_{new} - makespan_{old} + \lambda \cdot (utilization_{old} - utilization_{new})$$
+接受概率：
+$$P_{accept} = \begin{cases}
+1 &amp; \text{if } \Delta E &lt; 0 \\
+e^{-\Delta E / T} &amp; \text{otherwise}
+\end{cases}$$
+温度下降策略：$T_{k+1} = 0.95 \cdot T_k$</p>
+<p>模拟退火的关键在于邻域操作的设计。TSP编译器使用三种邻域操作：</p>
+<ol>
+<li><strong>节点迁移</strong>：将节点从一个处理器移到另一个，需重新计算通信开销</li>
+<li><strong>时间平移</strong>：在满足依赖约束的前提下，调整节点的执行时间</li>
+<li><strong>节点交换</strong>：交换两个无依赖关系节点的执行顺序</li>
+</ol>
+<p>每种操作的选择概率根据历史改进效果动态调整，使用UCB（Upper Confidence Bound）算法平衡探索与利用。</p>
+<h3 id="1213">12.1.3 寄存器分配策略</h3>
+<p>TSP的寄存器分配需要考虑向量寄存器文件的特殊结构。每个流处理器有320个向量寄存器，每个寄存器可存储320个FP16元素。</p>
+<p>寄存器分配是编译器后端的关键环节，直接影响程序性能。TSP的向量寄存器文件容量巨大（320个寄存器×320元素×2字节=200KB），但这并不意味着寄存器分配简单。相反，向量化计算的特点使得多个大型张量可能同时活跃，寄存器压力依然存在。此外，寄存器文件的多端口设计虽然支持高带宽访问，但端口冲突仍可能成为瓶颈。编译器必须精心编排寄存器使用，避免不必要的溢出和端口冲突。</p>
+<p><strong>活跃区间分析</strong></p>
+<p>首先计算每个变量的活跃区间（Live Range）。活跃区间分析是寄存器分配的基础，它确定了每个变量从定义到最后使用的生命周期。准确的活跃区间分析不仅能减少寄存器使用，还能识别寄存器重用机会：
+$$LR(v) = [def(v), last_use(v)]$$
+对于跨基本块的变量，需要进行数据流分析：
+$$LIVE_{in}(B) = USE(B) \cup (LIVE_{out}(B) - DEF(B))$$
+$$LIVE_{out}(B) = \bigcup_{S \in succ(B)} LIVE_{in}(S)$$
+<strong>图着色算法</strong></p>
+<p>构建冲突图 $G_{conflict} = (V_{var}, E_{conflict})$，其中：</p>
+<ul>
+<li>节点是变量</li>
+<li>边表示两个变量的活跃区间重叠</li>
+</ul>
+<p>使用Chaitin-Briggs算法进行着色：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">算法：寄存器分配</span>
+
+<span class="mf">1.</span><span class="w"> </span><span class="err">构建冲突图</span>
+<span class="mf">2.</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="err">图中有节点</span><span class="p">:</span>
+<span class="w">   </span><span class="mf">3.</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="err">存在度数</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">K的节点v</span><span class="p">:</span>
+<span class="w">      </span><span class="mf">4.</span><span class="w"> </span><span class="err">将</span><span class="n">v压入栈</span><span class="err">，从图中删除</span><span class="n">v</span>
+<span class="w">   </span><span class="mf">5.</span><span class="w"> </span><span class="k">else</span><span class="p">:</span>
+<span class="w">      </span><span class="mf">6.</span><span class="w"> </span><span class="err">选择</span><span class="n">spill代价最小的节点v</span>
+<span class="w">      </span><span class="mf">7.</span><span class="w"> </span><span class="n">spill_cost</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">load_cost</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">store_cost</span><span class="p">)</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">freq</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">degree</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+<span class="w">      </span><span class="mf">8.</span><span class="w"> </span><span class="err">标记</span><span class="n">v为spill</span><span class="err">，删除</span><span class="n">v</span>
+<span class="mf">3.</span><span class="w"> </span><span class="err">弹栈着色</span>
+</code></pre></div>
+
+<p>图着色的优化策略包括：</p>
+<ul>
+<li><strong>合并（Coalescing）</strong>：如果两个变量从不同时活跃且通过move指令连接，可以合并为同一个寄存器，消除move指令</li>
+<li><strong>预着色（Pre-coloring）</strong>：某些变量必须分配到特定寄存器（如函数参数），这些节点在图中预先着色</li>
+<li><strong>分层着色</strong>：将寄存器分为多个层次（如caller-saved、callee-saved），优先使用不同层次避免保存恢复开销</li>
+</ul>
+<p><strong>寄存器重命名优化</strong></p>
+<p>为减少false依赖，采用寄存器重命名：
+$$rename(v_{old}) \rightarrow v_{new} \text{ if } v_{old} \notin LIVE_{out}(block)$$
+重命名特别重要的场景是循环展开后的寄存器压力缓解。展开后的循环体中，不同迭代的临时变量可以使用不同的寄存器，避免WAR（Write After Read）和WAW（Write After Write）冒险。TSP的大容量寄存器文件为激进的重命名提供了空间。</p>
+<h3 id="1214">12.1.4 内存布局优化</h3>
+<p>TSP的片上SRAM采用分布式设计，共有230MB容量，分为144个bank。内存布局优化的目标是最小化bank冲突和最大化数据局部性。</p>
+<p><strong>Bank分配策略</strong></p>
+<p>采用素数取模哈希减少冲突：
+$$bank_id = (addr / block_size) \mod P$$
+其中 $P$ 是接近bank数量的素数（如139）。</p>
+<p>素数哈希的理论基础是数论中的均匀分布定理。当地址模式具有固定步长时（如遍历矩阵的行或列），素数模可以保证访问均匀分布到所有bank。相比之下，如果bank数是2的幂，某些访问模式会导致严重的bank冲突。TSP选择144个bank而非128或256，正是为了利用这一数学特性。</p>
+<p>Bank冲突的性能影响可以量化为：
+$$T_{access} = T_{base} \times (1 + conflict_rate \times (queue_depth - 1))$$
+其中 $conflict_rate$ 是冲突概率，$queue_depth$ 是bank的请求队列深度。优化目标是将 $conflict_rate$ 控制在5%以下。</p>
+<p><strong>数据布局变换</strong></p>
+<p>对于矩阵乘法 $C = A \times B$，采用分块布局：</p>
+<p>原始布局：$A[M][K], B[K][N], C[M][N]$</p>
+<p>优化布局：
+$$A_{tiled}[M/T_m][K/T_k][T_m][T_k]$$
+$$B_{tiled}[K/T_k][N/T_n][T_k][T_n]$$
+$$C_{tiled}[M/T_m][N/T_n][T_m][T_n]$$
+块大小选择考虑SRAM容量：
+$$T_m \times T_k + T_k \times T_n + T_m \times T_n \leq \frac{SRAM_{size}}{3 \times sizeof(fp16)}$$
+典型值：$T_m = T_n = 320, T_k = 640$（对应20KB + 40KB + 20KB = 80KB）</p>
+<p>这种4D布局的优势在于：</p>
+<ol>
+<li><strong>空间局部性</strong>：块内元素连续存储，充分利用SRAM的burst读取</li>
+<li><strong>时间局部性</strong>：整个块驻留在SRAM中，避免重复从DRAM加载</li>
+<li><strong>并行访问</strong>：不同块可以映射到不同bank，支持并行访问</li>
+<li><strong>向量化友好</strong>：块的最内层维度与向量宽度对齐</li>
+</ol>
+<p><strong>预取调度</strong></p>
+<p>使用双缓冲隐藏内存延迟：
+$$t_{prefetch}(block_{i+1}) = t_{compute}(block_i) - t_{transfer}$$
+确保：$t_{transfer} \leq t_{compute}$ 以完全隐藏传输延迟。</p>
+<p>双缓冲的内存开销是单缓冲的两倍，但能完全隐藏内存延迟。对于计算密集型操作（如矩阵乘法），这种权衡是值得的。预取调度器需要精确计算每个块的处理时间，考虑流水线深度、数据依赖和资源竞争等因素。TSP的确定性执行模型使这种精确调度成为可能。</p>
+<h2 id="122">12.2 数据流图优化</h2>
+<p>数据流图优化是TSP编译器提升性能的关键环节。通过识别和消除冗余计算、优化数据传输路径、融合相邻操作，可以显著减少计算量和内存访问，提高硬件利用率。</p>
+<p>数据流图优化的本质是在保持语义等价的前提下，变换程序的计算和数据访问模式。这类优化特别重要，因为TSP的静态调度特性意味着所有优化机会都必须在编译时被识别和利用。运行时没有第二次机会。编译器通过多轮优化遍历（optimization passes），逐步改进数据流图的质量。每个pass专注于特定的优化目标，如消除冗余、减少内存访问、提高并行度等。pass之间的顺序和交互需要精心设计，避免一个优化破坏另一个优化的机会。</p>
+<h3 id="1221">12.2.1 数据流图表示与构建</h3>
+<p>TSP编译器使用静态单赋值（Static Single Assignment, SSA）形式的数据流图作为中间表示。每个节点代表一个操作，边代表数据依赖关系。</p>
+<p>SSA形式的核心特性是每个变量只被赋值一次，这大大简化了数据流分析和优化。在SSA形式下，使用-定义链（use-def chains）是显式的，编译器可以轻松追踪数据的流动路径。对于神经网络这种以张量操作为主的计算，SSA形式特别合适，因为张量通常是不可变的，每个操作产生新的张量而不是修改现有张量。这种函数式的计算模型与SSA形式天然契合。</p>
+<p><strong>图结构定义</strong></p>
+<p>数据流图 $DFG = (N, E, A)$：</p>
+<ul>
+<li>$N$：节点集合，每个节点 $n_i$ 表示一个操作</li>
+<li>$E$：有向边集合，$(n_i, n_j) \in E$ 表示 $n_j$ 依赖 $n_i$ 的输出</li>
+<li>$A$：属性集合，包括操作类型、数据类型、张量形状等</li>
+</ul>
+<p>节点属性：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">Node</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">{</span>
+<span class="w">  </span><span class="nl">op_type</span><span class="p">:</span><span class="w"> </span><span class="err">{</span><span class="n">GEMM</span><span class="p">,</span><span class="w"> </span><span class="n">Conv</span><span class="p">,</span><span class="w"> </span><span class="k">Add</span><span class="p">,</span><span class="w"> </span><span class="n">ReLU</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="err">}</span>
+<span class="w">  </span><span class="nl">input_shapes</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">TensorShape</span><span class="o">]</span>
+<span class="w">  </span><span class="nl">output_shape</span><span class="p">:</span><span class="w"> </span><span class="n">TensorShape</span>
+<span class="w">  </span><span class="nl">compute_cost</span><span class="p">:</span><span class="w"> </span><span class="n">cycles</span>
+<span class="w">  </span><span class="nl">memory_footprint</span><span class="p">:</span><span class="w"> </span><span class="n">bytes</span>
+<span class="w">  </span><span class="nl">fusion_compatible</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">op_type</span><span class="o">]</span>
+<span class="err">}</span>
+</code></pre></div>
+
+<p><strong>从神经网络到DFG的转换</strong></p>
+<p>以Transformer的注意力机制为例：</p>
+<p>原始计算：
+$$Attention(Q,K,V) = softmax(\frac{QK^T}{\sqrt{d_k}})V$$
+转换为DFG节点序列：</p>
+<ol>
+<li>$n_1$: GEMM($Q$, $K^T$) → $S$</li>
+<li>$n_2$: Scale($S$, $1/\sqrt{d_k}$) → $S'$</li>
+<li>$n_3$: Softmax($S'$) → $A$</li>
+<li>$n_4$: GEMM($A$, $V$) → $O$</li>
+</ol>
+<p>数据依赖边：</p>
+<ul>
+<li>$(n_1, n_2)$: 传输 $S$ 矩阵</li>
+<li>$(n_2, n_3)$: 传输 $S'$ 矩阵</li>
+<li>$(n_3, n_4)$: 传输 $A$ 矩阵</li>
+</ul>
+<p><strong>关键路径分析</strong></p>
+<p>使用拓扑排序和动态规划计算关键路径：
+$$CP(n) = \begin{cases}
+0 &amp; \text{if } n \text{ is input} \\
+\max_{p \in pred(n)} \{CP(p) + latency(p) + comm(p,n)\} &amp; \text{otherwise}
+\end{cases}$$
+关键路径长度决定了理论最小执行时间：
+$$T_{min} = \max_{n \in N} \{CP(n) + latency(n)\}$$</p>
+<h3 id="1222">12.2.2 公共子表达式消除</h3>
+<p>公共子表达式消除（Common Subexpression Elimination, CSE）识别并复用重复计算，减少冗余操作。</p>
+<p>CSE在神经网络编译中特别有效，因为网络结构中经常出现重复的计算模式。例如，在多头注意力机制中，多个注意力头可能执行相同的投影操作；在残差网络中，跳跃连接可能导致相同的特征被多次处理。CSE不仅减少了计算量，还减少了内存占用，因为重复计算的中间结果只需存储一份。然而，CSE也需要权衡：复用结果需要额外的数据传输，如果传输开销超过重新计算的成本，CSE反而会降低性能。</p>
+<p><strong>哈希签名算法</strong></p>
+<p>为每个操作生成唯一签名，这是快速识别等价操作的关键。签名算法必须满足两个条件：等价的操作必须有相同的签名（完备性），不等价的操作应该有不同的签名（低冲突率）：
+$$hash(n) = hash_{combine}(op_type, hash(inputs), attributes)$$
+使用Merkle树结构递归计算：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">算法</span><span class="err">：</span><span class="n">CSE哈希签名</span>
+
+<span class="mf">1.</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="k">each</span><span class="w"> </span><span class="n">node</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="nl">topological_order</span><span class="p">:</span>
+<span class="w">   </span><span class="mf">2.</span><span class="w"> </span><span class="n">sig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hash</span><span class="p">(</span><span class="n">n</span><span class="p">.</span><span class="n">op_type</span><span class="p">)</span>
+<span class="w">   </span><span class="mf">3.</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="k">each</span><span class="w"> </span><span class="k">input</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="k">of</span><span class="w"> </span><span class="nl">n</span><span class="p">:</span>
+<span class="w">      </span><span class="mf">4.</span><span class="w"> </span><span class="n">sig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sig</span><span class="w"> </span><span class="err">⊕</span><span class="w"> </span><span class="p">(</span><span class="n">hash</span><span class="p">(</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">rotation</span><span class="p">)</span>
+<span class="w">   </span><span class="mf">5.</span><span class="w"> </span><span class="n">sig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sig</span><span class="w"> </span><span class="err">⊕</span><span class="w"> </span><span class="n">hash</span><span class="p">(</span><span class="n">n</span><span class="p">.</span><span class="n">attributes</span><span class="p">)</span>
+<span class="w">   </span><span class="mf">6.</span><span class="w"> </span><span class="n">signature_map</span><span class="o">[</span><span class="n">sig</span><span class="o">]</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>等价性验证</strong></p>
+<p>两个节点等价的充要条件：</p>
+<ol>
+<li>操作类型相同</li>
+<li>输入张量形状相同</li>
+<li>数值属性相同（如卷积步长、填充等）</li>
+<li>输入来源等价（递归定义）</li>
+</ol>
+<p>对于浮点运算，考虑数值稳定性：
+$$|result_1 - result_2| &lt; \epsilon \cdot \max(|result_1|, |result_2|)$$
+其中 $\epsilon = 2^{-10}$ 对于FP16。</p>
+<p><strong>CSE收益评估</strong></p>
+<p>消除节点 $n$ 的收益：
+$$benefit(n) = freq(n) \times (cost_{compute}(n) + cost_{memory}(n)) - cost_{forward}(n)$$
+其中：</p>
+<ul>
+<li>$freq(n)$：节点执行频率（批处理中的重复次数）</li>
+<li>$cost_{forward}(n)$：转发结果的通信开销</li>
+</ul>
+<p>只有当 $benefit(n) &gt; threshold$ 时才执行CSE。</p>
+<h3 id="1223">12.2.3 死代码消除</h3>
+<p>死代码消除（Dead Code Elimination, DCE）移除不影响最终输出的计算。</p>
+<p><strong>活跃性分析</strong></p>
+<p>从输出节点反向标记活跃节点：</p>
+<div class="codehilite"><pre><span></span><code>算法：标记活跃节点
+
+1. worklist = output_nodes
+2. while worklist不为空:
+   3. n = worklist.pop()
+   4. mark n as live
+   5. for each input i of n:
+      6. if i not marked:
+         7. worklist.push(i)
+</code></pre></div>
+
+<p><strong>副作用处理</strong></p>
+<p>某些操作即使输出未使用也不能消除：</p>
+<ul>
+<li>内存写操作（store、scatter）</li>
+<li>同步操作（barrier、fence）</li>
+<li>调试输出（print、assert）</li>
+</ul>
+<p>标记具有副作用的节点：
+$$has_side_effect(n) = n.op \in \{store, print, barrier\} \vee \exists_{child} has_side_effect(child)$$
+<strong>激进死代码消除</strong></p>
+<p>使用值编号（Value Numbering）进行更激进的优化：
+$$VN(n) = \begin{cases}
+const_fold(n) &amp; \text{if all inputs are constant} \\
+VN(n.input) &amp; \text{if } n \text{ is identity op} \\
+\perp &amp; \text{if } n \text{ is dead}
+\end{cases}$$</p>
+<h3 id="1224">12.2.4 循环优化技术</h3>
+<p>循环是NPU计算的主要模式，优化循环结构对性能至关重要。</p>
+<p>循环优化是编译器优化的核心，因为大部分程序执行时间都花在循环内部。对于神经网络工作负载，这一点尤其突出：卷积的嵌套循环、矩阵乘法的三重循环、批处理的外层循环等。循环优化不仅影响计算效率，还决定了内存访问模式和数据重用程度。TSP编译器采用多层次的循环优化策略，从内层的向量化、展开，到外层的分块、交换，再到跨循环的融合、分裂，形成了完整的优化体系。</p>
+<p><strong>循环展开（Loop Unrolling）</strong></p>
+<p>展开因子选择基于向量宽度和寄存器压力。循环展开通过减少循环控制开销和增加指令级并行来提升性能。对于TSP的超宽向量架构，展开还能更好地利用320宽的向量单元。但过度展开会导致代码膨胀和寄存器溢出，因此需要精确的成本模型指导：
+$$unroll_factor = \min\left(\frac{VectorWidth}{DataWidth}, \frac{RegisterFile}{LiveVariables}\right)$$
+对于TSP的320宽向量单元处理FP16：
+$$unroll_factor = \min(320, \frac{320}{active_vars})$$
+展开后的循环体：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">原始</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">N</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">]</span>
+
+<span class="n">展开4次</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">)</span><span class="err">:</span>
+<span class="w">          </span><span class="n">C</span><span class="o">[</span><span class="n">i:i+4</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i:i+4</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i:i+4</span><span class="o">]</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">向量化</span>
+</code></pre></div>
+
+<p><strong>循环分块（Loop Tiling）</strong></p>
+<p>多维循环的分块策略，以矩阵乘法为例：
+$$\begin{aligned}
+&amp;\text{for } i_o \in [0, M, T_m]: \\
+&amp;\quad \text{for } j_o \in [0, N, T_n]: \\
+&amp;\quad\quad \text{for } k_o \in [0, K, T_k]: \\
+&amp;\quad\quad\quad \text{// 内部循环完全展开或向量化} \\
+&amp;\quad\quad\quad C[i_o:i_o+T_m][j_o:j_o+T_n] += \\
+&amp;\quad\quad\quad\quad A[i_o:i_o+T_m][k_o:k_o+T_k] \times B[k_o:k_o+T_k][j_o:j_o+T_n]
+\end{aligned}$$
+块大小优化目标函数：
+$$\min_{T_m,T_n,T_k} \left( \frac{MNK}{T_m T_n T_k} \times t_{tile} + t_{overhead} \right)$$
+约束：$T_m \times T_k + T_k \times T_n + T_m \times T_n \leq SRAM_{size}$</p>
+<p><strong>循环融合（Loop Fusion）</strong></p>
+<p>融合条件判断：</p>
+<ol>
+<li><strong>依赖兼容</strong>：不存在反向依赖</li>
+<li><strong>迭代空间对齐</strong>：循环边界相同或可调整</li>
+<li><strong>资源不超限</strong>：融合后资源使用不超过硬件限制</li>
+</ol>
+<p>融合收益模型：
+$$gain = saved_memory_traffic - alignment_overhead$$
+其中：
+$$saved_memory_traffic = size(intermediate_tensor) \times 2 \times bandwidth_cost$$
+$$alignment_overhead = \begin{cases}
+0 &amp; \text{if perfectly aligned} \\
+padding_size \times element_size &amp; \text{otherwise}
+\end{cases}$$
+<strong>循环交换（Loop Interchange）</strong></p>
+<p>通过交换循环顺序优化内存访问模式：</p>
+<p>原始（列优先访问，cache不友好）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">N</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">M</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">process</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="p">)</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">跨步访问</span>
+</code></pre></div>
+
+<p>交换后（行优先访问，cache友好）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">M</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">N</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">process</span><span class="p">(</span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="p">)</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">连续访问</span>
+</code></pre></div>
+
+<p>局部性评分：
+$$locality_score = \frac{consecutive_accesses}{total_accesses} \times cache_hit_rate$$
+选择使 $locality_score$ 最大的循环顺序。</p>
+<h2 id="123">12.3 自动并行化</h2>
+<p>TSP编译器的自动并行化技术是实现高性能的关键。通过自动识别并行机会、划分计算任务、协调多个处理单元，编译器能够充分利用TSP的大规模并行计算资源。</p>
+<p>自动并行化的挑战在于识别安全的并行机会并有效地映射到硬件资源。TSP的确定性执行模型为并行化提供了独特优势：编译器可以精确预测并行执行的时序，避免运行时的竞争条件。这使得TSP可以实现更激进的并行化策略，包括细粒度的流水线并行和跨层的任务并行。编译器通过依赖分析、多面体模型和符号执行等技术，系统地探索并行化空间，找到最优的并行方案。</p>
+<h3 id="1231">12.3.1 数据并行识别</h3>
+<p>数据并行是最常见的并行模式，适用于对不同数据执行相同操作的场景。</p>
+<p>神经网络天然具有丰富的数据并行性。批处理维度提供了最直接的并行机会，不同样本的处理完全独立。空间维度（高度、宽度）在卷积等局部操作中也可以并行化。通道维度的并行化则需要更细致的分析，因为某些操作（如批归一化）在通道维度有依赖关系。TSP编译器通过精确的依赖分析，识别所有安全的数据并行机会，并根据硬件资源和数据局部性选择最优的并行策略。</p>
+<p><strong>并行性分析</strong></p>
+<p>使用多面体模型（Polyhedral Model）分析循环并行性：</p>
+<p>对于仿射循环：
+$$\vec{i} \in \mathcal{D} = \{\vec{i} | A\vec{i} \geq \vec{b}\}$$
+依赖关系表示为：
+$$\vec{i} \rightarrow \vec{j} \text{ if } \exists \vec{i}, \vec{j} \in \mathcal{D}: W(\vec{i}) \cap R(\vec{j}) \neq \emptyset \wedge \vec{i} \prec \vec{j}$$
+其中 $W(\vec{i})$ 是迭代 $\vec{i}$ 的写集合，$R(\vec{j})$ 是迭代 $\vec{j}$ 的读集合。</p>
+<p><strong>依赖距离向量</strong></p>
+<p>计算依赖距离向量判断并行性：
+$$\vec{d} = \vec{j} - \vec{i}$$
+如果所有依赖的距离向量在某个维度 $k$ 上满足 $d_k = 0$，则该维度可以并行化。</p>
+<p>例如，对于矩阵加法：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">M</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">N</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span>
+</code></pre></div>
+
+<p>依赖分析显示两个维度都可以并行：$d_i = 0, d_j = 0$。</p>
+<p><strong>批处理维度并行</strong></p>
+<p>神经网络推理的批处理维度天然并行：
+$$Y[b][c][h][w] = \sum_k W[c][k] \cdot X[b][k][h'][w']$$
+批处理维度 $b$ 无跨样本依赖，可完全并行化：</p>
+<p>并行效率：
+$$\eta_{batch} = \frac{T_{seq}}{T_{parallel} \times P} = \frac{B \times t_{single}}{(B/P + overhead) \times P}$$
+当 $B \gg P$ 时，$\eta_{batch} \approx 1 - \frac{overhead \times P}{B \times t_{single}}$</p>
+<p><strong>空间维度并行</strong></p>
+<p>卷积的空间维度并行化策略：</p>
+<p>输出分片：将输出特征图划分为多个tile
+$$Output[h_s:h_e][w_s:w_e] = Conv(Input[h_s-p:h_e+p][w_s-p:w_e+p], Weight)$$
+其中 $p = \lfloor kernel_size / 2 \rfloor$ 是padding。</p>
+<p>Halo交换开销：
+$$overhead_{halo} = 2p \times (tile_height + tile_width) \times channels \times sizeof(fp16)$$
+最优tile大小：
+$$tile_size_{opt} = \sqrt{\frac{SRAM_{per_core}}{channels \times sizeof(fp16) \times (1 + \frac{2p}{tile_size})}}$$</p>
+<h3 id="1232">12.3.2 流水线并行</h3>
+<p>流水线并行将计算划分为多个阶段，不同阶段同时处理不同批次的数据。</p>
+<p>流水线并行特别适合深度神经网络，因为网络的层级结构天然形成了流水线阶段。TSP的确定性执行模型使得流水线调度更加高效：编译器可以精确计算每个阶段的执行时间，消除流水线气泡。与GPU的动态流水线不同，TSP的静态流水线在编译时就确定了所有的数据传输和同步点，避免了运行时的调度开销。这种方法特别适合推理场景，因为推理的计算模式是固定的，可以实现完美的流水线平衡。</p>
+<p><strong>阶段划分算法</strong></p>
+<p>目标：均衡各阶段计算时间，最小化流水线延迟。阶段划分是流水线并行的关键，不均衡的划分会导致某些阶段成为瓶颈，降低整体吞吐量。TSP编译器使用动态规划算法寻找最优划分，同时考虑计算时间、内存容量和通信开销等多个约束：</p>
+<p>给定 $L$ 层网络，划分为 $P$ 个阶段，优化目标：
+$$\min \max_{p \in [1,P]} \sum_{l \in stage_p} t_l$$
+约束：$\sum_{l \in stage_p} m_l \leq M_{per_stage}$</p>
+<p>使用动态规划求解：
+$$DP[i][p] = \min_{j&lt;i} \{\max(DP[j][p-1], \sum_{k=j+1}^{i} t_k)\}$$
+<strong>流水线调度</strong></p>
+<p>1F1B（One Forward One Backward）调度策略：</p>
+<p>时间步 $t$ 时，阶段 $p$ 处理的微批次：
+$$microbatch_{p,t} = \begin{cases}
+t - p &amp; \text{if } t \geq p \text{ (forward)} \\
+t - 2P + p + 1 &amp; \text{if } t \geq 2P - p - 1 \text{ (backward)}
+\end{cases}$$
+流水线效率：
+$$\eta_{pipe} = \frac{n \times \sum_l t_l}{(n + P - 1) \times \max_p \sum_{l \in stage_p} t_l}$$
+当 $n \gg P$ 时，$\eta_{pipe} \approx \frac{\text{average stage time}}{\text{max stage time}}$</p>
+<p><strong>气泡优化</strong></p>
+<p>减少流水线气泡的策略：</p>
+<ol>
+<li>
+<p><strong>微批次数量优化</strong>：
+$$n_{opt} = \arg\min_n \left\{\frac{P-1}{n} + \frac{memory_usage(n)}{memory_limit}\right\}$$</p>
+</li>
+<li>
+<p><strong>交错调度</strong>：
+   将每个阶段分为两个虚拟阶段，减少气泡：
+$$bubble_{interleaved} = \frac{bubble_{naive}}{2}$$</p>
+</li>
+<li>
+<p><strong>异步通信隐藏</strong>：
+   计算与通信重叠：
+$$t_{effective} = \max(t_{compute}, t_{communicate})$$</p>
+</li>
+</ol>
+<h3 id="1233">12.3.3 模型并行策略</h3>
+<p>模型并行将单个操作分解到多个处理器上执行，适用于超大模型。</p>
+<p><strong>张量并行</strong></p>
+<p>矩阵乘法的列并行分解：
+$$Y = XW = X[W_1 | W_2 | ... | W_P] = [XW_1 | XW_2 | ... | XW_P]$$
+每个处理器计算：
+$$Y_p = XW_p, \quad W_p \in \mathbb{R}^{d_{in} \times (d_{out}/P)}$$
+通信模式：</p>
+<ul>
+<li>前向传播：broadcast $X$，无需通信聚合</li>
+<li>反向传播：all-reduce梯度</li>
+</ul>
+<p>通信量：
+$$comm_{tensor} = 2 \times batch \times d_{in} \times sizeof(fp16)$$
+<strong>注意力机制并行</strong></p>
+<p>多头注意力的头并行：
+$$MultiHead(Q,K,V) = Concat(head_1, ..., head_H)W^O$$
+每个处理器计算 $H/P$ 个注意力头：
+$$head_{p} = Attention(QW_p^Q, KW_p^K, VW_p^V)$$
+优势：</p>
+<ul>
+<li>头之间完全独立，无需通信</li>
+<li>只在最后的线性投影需要all-reduce</li>
+</ul>
+<p><strong>2D并行分解</strong></p>
+<p>对于超大矩阵，采用2D分解：
+$$C = AB = \begin{bmatrix} A_{11} &amp; A_{12} \\ A_{21} &amp; A_{22} \end{bmatrix} \begin{bmatrix} B_{11} &amp; B_{12} \\ B_{21} &amp; B_{22} \end{bmatrix}$$
+处理器 $(i,j)$ 计算：
+$$C_{ij} = \sum_{k} A_{ik}B_{kj}$$
+通信模式：</p>
+<ul>
+<li>行广播：每个 $A_{ik}$ 在行内广播</li>
+<li>列广播：每个 $B_{kj}$ 在列内广播</li>
+<li>结果累加：同位置reduce</li>
+</ul>
+<p>总通信量（$P = \sqrt{P_{total}}$）：
+$$comm_{2D} = 2 \times \frac{matrix_size}{\sqrt{P}}$$
+相比1D并行减少 $\sqrt{P}$ 倍通信。</p>
+<h3 id="1234">12.3.4 混合并行优化</h3>
+<p>实际应用中，通常结合多种并行策略以达到最佳性能。</p>
+<p><strong>并行策略选择</strong></p>
+<p>基于模型特征和硬件参数自动选择：</p>
+<div class="codehilite"><pre><span></span><code>决策树：
+if model_size &gt; memory_per_device:
+    使用模型并行
+    if batch_size &gt; threshold:
+        添加数据并行
+else:
+    if num_devices &gt; num_layers:
+        使用流水线并行 + 数据并行
+    else:
+        纯数据并行
+</code></pre></div>
+
+<p><strong>成本模型</strong></p>
+<p>综合考虑计算、通信、内存的成本模型：
+$$Cost_{total} = \alpha \cdot T_{compute} + \beta \cdot T_{comm} + \gamma \cdot M_{usage}$$
+其中：</p>
+<ul>
+<li>$T_{compute} = \frac{FLOPs}{throughput \times utilization}$</li>
+<li>$T_{comm} = \frac{data_{transfer}}{bandwidth \times efficiency}$</li>
+<li>$M_{usage} = max(M_{activation}, M_{weight}, M_{gradient})$</li>
+</ul>
+<p><strong>自动搜索算法</strong></p>
+<p>使用强化学习搜索最优并行策略：</p>
+<p>状态空间：$S = \{data_parallel, tensor_parallel, pipeline_parallel\}$
+动作空间：$A = \{increase, decrease, maintain\}$ for each dimension
+奖励函数：$R = -Cost_{total}$</p>
+<p>搜索算法：</p>
+<div class="codehilite"><pre><span></span><code>算法：并行策略搜索
+
+1. 初始化策略 π
+2. for episode in range(max_episodes):
+   3. s = random_initial_state()
+   4. for step in range(max_steps):
+      5. a = π(s) + exploration_noise
+      6. s&#39; = apply_action(s, a)
+      7. r = evaluate_performance(s&#39;)
+      8. update_policy(π, s, a, r, s&#39;)
+      9. s = s&#39;
+</code></pre></div>
+
+<p><strong>负载均衡</strong></p>
+<p>动态负载均衡策略：</p>
+<p>工作窃取（Work Stealing）：
+$$\text{if } queue_{self}.empty() \text{ and } \exists p: |queue_p| &gt; threshold:$$
+$$\quad steal(queue_p.pop_half())$$
+负载评估指标：
+$$imbalance = \frac{\max_p(workload_p) - \min_p(workload_p)}{avg(workload)}$$
+目标：保持 $imbalance &lt; 0.1$。</p>
+<h2 id="_1">本章小结</h2>
+<p>本章深入探讨了TSP编译器的核心技术，包括静态调度、数据流图优化和自动并行化三大关键组件。</p>
+<p><strong>关键要点回顾：</strong></p>
+<ol>
+<li>
+<p><strong>静态调度算法</strong>：TSP采用编译时完全确定的调度策略，通过精确的硬件建模和约束优化，生成时钟级精确的执行计划。核心公式包括：
+   - 调度目标函数：$\min \max_{v_i \in V} \{T(v_i) + t_{comp}(v_i)\}$
+   - 依赖约束：$T(v_j) \geq T(v_i) + t_{comp}(v_i) + t_{comm}(v_i, v_j)$
+   - 内存布局优化：$T_m \times T_k + T_k \times T_n + T_m \times T_n \leq SRAM_{size}$</p>
+</li>
+<li>
+<p><strong>数据流图优化</strong>：通过CSE、DCE和循环优化减少冗余计算，提高硬件利用率：
+   - CSE收益模型：$benefit(n) = freq(n) \times cost(n) - overhead$
+   - 循环分块约束：块大小受限于片上SRAM容量
+   - 循环融合条件：依赖兼容、迭代空间对齐、资源不超限</p>
+</li>
+<li>
+<p><strong>自动并行化</strong>：编译器自动识别并利用多种并行机会：
+   - 数据并行效率：$\eta_{batch} \approx 1 - \frac{overhead \times P}{B \times t_{single}}$
+   - 流水线效率：$\eta_{pipe} \approx \frac{\text{average stage time}}{\text{max stage time}}$
+   - 2D并行通信优化：相比1D减少 $\sqrt{P}$ 倍通信量</p>
+</li>
+</ol>
+<p><strong>与传统GPU编译器的主要区别：</strong></p>
+<ul>
+<li>确定性执行 vs 动态调度</li>
+<li>编译时间换运行时间的设计理念</li>
+<li>无需运行时调度器，减少控制开销</li>
+<li>更精确的性能预测和优化</li>
+</ul>
+<h2 id="_2">练习题</h2>
+<h3 id="_3">基础题（理解概念）</h3>
+<p><strong>练习12.1</strong> 给定一个计算图，包含4个节点：A(输入)→B(GEMM, 100 cycles)→C(ReLU, 10 cycles)→D(输出)，B→D也有直接连接(Residual)。假设通信时间为20 cycles，计算该图的关键路径长度。</p>
+<details>
+<summary>答案</summary>
+<p>关键路径是从输入到输出的最长路径。有两条路径：</p>
+<ul>
+<li>路径1：A → B → C → D，长度 = 100 + 20 + 10 + 20 = 150 cycles</li>
+<li>路径2：A → B → D，长度 = 100 + 20 = 120 cycles</li>
+</ul>
+<p>关键路径长度 = max(150, 120) = 150 cycles</p>
+</details>
+<p><strong>练习12.2</strong> 对于矩阵乘法 $C[1024][1024] = A[1024][512] \times B[512][1024]$，使用FP16数据类型，片上SRAM为230MB。计算最优的分块大小 $(T_m, T_n, T_k)$。</p>
+<details>
+<summary>答案</summary>
+<p>约束：$T_m \times T_k + T_k \times T_n + T_m \times T_n \leq \frac{230 \times 10^6}{2}$ bytes</p>
+<p>设 $T_m = T_n = T$（对称分块），则：
+$2T \times T_k + T^2 \leq 115 \times 10^6$</p>
+<p>为最大化块大小，设 $T_k = 2T$：
+$4T^2 + T^2 = 5T^2 \leq 115 \times 10^6$
+$T \leq \sqrt{23 \times 10^6} \approx 4796$</p>
+<p>考虑向量宽度320的倍数：$T_m = T_n = 4800, T_k = 9600$</p>
+<p>验证：$(4800 \times 9600 + 9600 \times 4800 + 4800 \times 4800) \times 2 = 230.4MB$ ≈ 230MB ✓</p>
+</details>
+<p><strong>练习12.3</strong> 某循环的迭代次数为1000，每次迭代需要5个活跃变量。TSP有320个向量寄存器，向量宽度320。计算最优的循环展开因子。</p>
+<details>
+<summary>答案</summary>
+<p>展开因子 = $\min(\frac{320}{1}, \frac{320}{5}) = \min(320, 64) = 64$</p>
+<p>但需要考虑迭代次数1000不能被64整除，实际展开因子选择：</p>
+<ul>
+<li>50（1000/50 = 20，整除）</li>
+<li>40（1000/40 = 25，整除）</li>
+<li>25（1000/25 = 40，整除）</li>
+</ul>
+<p>选择40或50都合理，取决于其他优化目标。</p>
+</details>
+<h3 id="_4">挑战题（深入分析）</h3>
+<p><strong>练习12.4</strong> 设计一个调度算法，将Transformer的一个encoder block映射到4个TSP核心上。Block包含：Multi-Head Attention (MHA)、LayerNorm1、FFN、LayerNorm2。给出并行策略和通信模式。</p>
+<details>
+<summary>答案</summary>
+<p>策略1：流水线并行</p>
+<ul>
+<li>Core 0: MHA的QKV投影</li>
+<li>Core 1: Attention计算 + 输出投影</li>
+<li>Core 2: LayerNorm1 + FFN第一层</li>
+<li>Core 3: FFN第二层 + LayerNorm2</li>
+</ul>
+<p>通信模式：</p>
+<ul>
+<li>Core 0→1: QKV矩阵，$3 \times batch \times seq \times d_{model} \times 2$ bytes</li>
+<li>Core 1→2: Attention输出，$batch \times seq \times d_{model} \times 2$ bytes</li>
+<li>Core 2→3: FFN中间激活，$batch \times seq \times d_{ff} \times 2$ bytes</li>
+</ul>
+<p>策略2：张量并行（推荐）</p>
+<ul>
+<li>每个核心处理 $d_{model}/4$ 维度</li>
+<li>MHA：每核心处理 $num_heads/4$ 个注意力头</li>
+<li>FFN：列并行分解</li>
+<li>通信：每层后all-reduce，共4次</li>
+</ul>
+<p>比较：张量并行更均衡，通信量更小。</p>
+</details>
+<p><strong>练习12.5</strong> 推导2:4稀疏矩阵乘法在TSP上的理论加速比。考虑稀疏索引开销和向量单元利用率。</p>
+<details>
+<summary>答案</summary>
+<p>密集GEMM计算量：$2MNK$ FLOPs
+2:4稀疏GEMM计算量：$MNK$ FLOPs（50%稀疏）</p>
+<p>但需考虑：</p>
+<ol>
+<li>索引开销：每4个元素需2bit索引，开销率 = $\frac{2}{4 \times 16} = 3.125\%$</li>
+<li>向量利用率：2:4模式下，向量单元利用率 ≈ 75%（需要mask操作）</li>
+<li>内存带宽：减少50%权重读取，但增加索引读取</li>
+</ol>
+<p>理论加速比：
+$$Speedup = \frac{1}{0.5 \times \frac{1}{0.75} + 0.03125} = \frac{1}{0.667 + 0.031} \approx 1.43$$
+实际加速比约1.4-1.5倍。</p>
+</details>
+<p><strong>练习12.6</strong> 分析Flash Attention在TSP编译器中的实现策略。给出分块大小选择和SRAM分配方案。</p>
+<details>
+<summary>答案</summary>
+<p>Flash Attention核心思想：分块计算注意力，减少HBM访问。</p>
+<p>TSP上的分块策略：</p>
+<ul>
+<li>序列长度分块：$B_r = B_c = \sqrt{\frac{SRAM_{size}}{4 \times d \times sizeof(fp16)}}$</li>
+<li>对于230MB SRAM，$d=128$：$B_r = B_c = \sqrt{\frac{230 \times 10^6}{4 \times 128 \times 2}} \approx 1500$</li>
+</ul>
+<p>SRAM分配（总计230MB）：</p>
+<ul>
+<li>Q块：$B_r \times d \times 2 = 1500 \times 128 \times 2 = 384KB$</li>
+<li>K块：$B_c \times d \times 2 = 384KB$</li>
+<li>V块：$B_c \times d \times 2 = 384KB$</li>
+<li>S矩阵：$B_r \times B_c \times 2 = 4.5MB$</li>
+<li>输出O：$B_r \times d \times 2 = 384KB$</li>
+<li>统计量(row_max, row_sum)：$B_r \times 4 = 6KB$</li>
+</ul>
+<p>总计：约6MB per block，可同时处理多个block提高并行度。</p>
+</details>
+<p><strong>练习12.7</strong> 设计一个启发式算法，自动选择数据并行、模型并行和流水线并行的组合。输入：模型大小M、批大小B、设备数P、设备内存C。</p>
+<details>
+<summary>答案</summary>
+<div class="codehilite"><pre><span></span><code>算法：混合并行策略选择
+输入：M(模型大小), B(批大小), P(设备数), C(设备内存)
+
+1. 计算模型并行度需求：
+   mp = ceil(M / C)  // 最小模型并行度
+
+2. 剩余并行度用于数据并行和流水线并行：
+   P_remain = P / mp
+
+3. 决策树：
+   if B &gt;= P_remain <span class="gs">* 4:  // 批足够大</span>
+<span class="gs">      dp = P_remain      // 全部数据并行</span>
+<span class="gs">      pp = 1</span>
+<span class="gs">   elif M &gt; 10GB and P_remain &gt;= 4:  // 大模型</span>
+<span class="gs">      pp = min(4, P_remain)  // 流水线并行</span>
+<span class="gs">      dp = P_remain / pp      // 剩余数据并行</span>
+<span class="gs">   else:</span>
+<span class="gs">      dp = sqrt(P_remain)   // 均衡分配</span>
+<span class="gs">      pp = P_remain / dp</span>
+
+<span class="gs">4. 验证内存约束：</span>
+<span class="gs">   mem_per_device = M/mp + B/dp *</span> activation_memory
+   if mem_per_device &gt; C:
+      增加mp，返回步骤2
+
+5. 返回 (dp, mp, pp)
+</code></pre></div>
+
+<p>示例：M=20GB, B=256, P=16, C=8GB</p>
+<ul>
+<li>mp = ceil(20/8) = 3 → 实际取4（2的幂）</li>
+<li>P_remain = 16/4 = 4</li>
+<li>B/P_remain = 256/4 = 64 &gt; 16 → dp=4, pp=1</li>
+<li>结果：(dp=4, mp=4, pp=1)</li>
+</ul>
+</details>
+<p><strong>练习12.8</strong> 分析TSP编译器如何优化批量矩阵乘法（BMM）操作：$C[B][M][N] = A[B][M][K] \times B[B][K][N]$。考虑数据重用和并行策略。</p>
+<details>
+<summary>答案</summary>
+<p>优化策略分析：</p>
+<ol>
+<li>
+<p><strong>批维度并行化</strong>：
+   - 将B个矩阵乘法分配到不同核心
+   - 无数据依赖，完全并行
+   - 通信量：0（理想情况）</p>
+</li>
+<li>
+<p><strong>数据重用优化</strong>：
+   如果某些批次共享权重（如attention中的投影矩阵）：</p>
+</li>
+</ol>
+<ul>
+<li>权重驻留：将共享的权重保持在SRAM</li>
+<li>重用率：$reuse = B \times \frac{computation}{data_movement}$</li>
+</ul>
+<ol start="3">
+<li><strong>循环顺序优化</strong>：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>最优顺序（最大化重用）：
+for b_o in range(0, B, Tb):
+  for m_o in range(0, M, Tm):
+    for n_o in range(0, N, Tn):
+      for k_o in range(0, K, Tk):
+        // 内层完全展开
+        C[b_o:b_o+Tb][m_o:m_o+Tm][n_o:n_o+Tn] += 
+          A[b_o:b_o+Tb][m_o:m_o+Tm][k_o:k_o+Tk] @ 
+          B[b_o:b_o+Tb][k_o:k_o+Tk][n_o:n_o+Tn]
+</code></pre></div>
+
+<ol start="4">
+<li><strong>分块大小选择</strong>：
+   约束：$Tb \times (Tm \times Tk + Tk \times Tn + Tm \times Tn) \times 2 \leq SRAM$</li>
+</ol>
+<p>目标：最大化 $Tb$ 以减少批次切换开销</p>
+<p>示例：SRAM=230MB, M=N=512, K=512</p>
+<ul>
+<li>单个矩阵乘法需要：$(512^2 + 512^2 + 512^2) \times 2 = 1.5MB$</li>
+<li>$Tb_{max} = 230/1.5 \approx 153$</li>
+<li>实际选择 $Tb = 128$（2的幂）</li>
+</ul>
+<ol start="5">
+<li><strong>向量化策略</strong>：
+   - 最内层循环向量化宽度：320（TSP向量宽度）
+   - 展开因子：$unroll = \min(Tn, 320)$</li>
+</ol>
+<p>总体加速比（相对于逐个处理）：
+$$Speedup = Tb \times \frac{utilization_{vectorized}}{utilization_{scalar}} \approx 128 \times 0.9 / 0.3 \approx 384x$$</p>
+</details>
+<h2 id="_5">常见陷阱与错误</h2>
+<ol>
+<li>
+<p><strong>过度优化编译时间</strong>
+   - 陷阱：使用过于复杂的优化算法，导致编译时间过长
+   - 解决：设置编译时间上限，使用渐进式优化策略</p>
+</li>
+<li>
+<p><strong>忽视数值精度</strong>
+   - 陷阱：激进的融合和重排可能改变浮点运算顺序，影响数值稳定性
+   - 解决：保守处理reduction操作，提供精度控制选项</p>
+</li>
+<li>
+<p><strong>静态调度的局限性</strong>
+   - 陷阱：对动态形状或条件分支处理不当
+   - 解决：预留动态调度路径，支持有限的运行时调整</p>
+</li>
+<li>
+<p><strong>内存分配碎片</strong>
+   - 陷阱：频繁的小块分配导致SRAM碎片化
+   - 解决：使用内存池，预分配大块连续内存</p>
+</li>
+<li>
+<p><strong>并行策略选择不当</strong>
+   - 陷阱：盲目追求高并行度，忽视通信开销
+   - 解决：基于实测建立准确的成本模型</p>
+</li>
+<li>
+<p><strong>依赖分析错误</strong>
+   - 陷阱：错误识别数据依赖，导致错误的并行化
+   - 解决：保守分析别名，使用形式化验证方法</p>
+</li>
+<li>
+<p><strong>寄存器溢出</strong>
+   - 陷阱：过度展开导致寄存器压力过大
+   - 解决：动态调整展开因子，监控寄存器使用</p>
+</li>
+<li>
+<p><strong>忽略硬件特性</strong>
+   - 陷阱：未考虑bank冲突、对齐要求等硬件约束
+   - 解决：在成本模型中准确建模硬件行为</p>
+</li>
+</ol>
+<h2 id="_6">最佳实践检查清单</h2>
+<h3 id="_7">编译器设计审查</h3>
+<ul>
+<li>[ ] <strong>调度算法</strong></li>
+<li>□ 是否正确处理所有数据依赖？</li>
+<li>□ 是否考虑了资源约束（计算、内存、带宽）？</li>
+<li>□ 是否有死锁可能？</li>
+<li>
+<p>□ 关键路径是否已优化？</p>
+</li>
+<li>
+<p>[ ] <strong>优化pass顺序</strong></p>
+</li>
+<li>□ Pass之间是否会相互干扰？</li>
+<li>□ 是否存在优化机会丢失？</li>
+<li>
+<p>□ 迭代优化是否会收敛？</p>
+</li>
+<li>
+<p>[ ] <strong>内存管理</strong></p>
+</li>
+<li>□ 是否最大化了数据重用？</li>
+<li>□ Bank冲突是否已minimized？</li>
+<li>□ 是否支持动态内存分配？</li>
+<li>□ 内存泄漏检测机制是否完备？</li>
+</ul>
+<h3 id="_8">性能优化审查</h3>
+<ul>
+<li>[ ] <strong>并行化策略</strong></li>
+<li>□ 是否识别了所有并行机会？</li>
+<li>□ 负载是否均衡？</li>
+<li>□ 通信开销是否已最小化？</li>
+<li>
+<p>□ 是否支持动态负载均衡？</p>
+</li>
+<li>
+<p>[ ] <strong>向量化效率</strong></p>
+</li>
+<li>□ 向量单元利用率是否 &gt; 80%？</li>
+<li>□ 是否存在不必要的标量操作？</li>
+<li>
+<p>□ 数据对齐是否正确？</p>
+</li>
+<li>
+<p>[ ] <strong>循环优化</strong></p>
+</li>
+<li>□ 循环顺序是否最优？</li>
+<li>□ 分块大小是否合理？</li>
+<li>□ 是否充分利用了循环不变量？</li>
+</ul>
+<h3 id="_9">正确性验证</h3>
+<ul>
+<li>[ ] <strong>数值准确性</strong></li>
+<li>□ 浮点运算顺序改变是否可接受？</li>
+<li>□ 是否有溢出/下溢风险？</li>
+<li>
+<p>□ 量化误差是否在容忍范围内？</p>
+</li>
+<li>
+<p>[ ] <strong>功能正确性</strong></p>
+</li>
+<li>□ 是否有完整的单元测试？</li>
+<li>□ 边界条件是否已覆盖？</li>
+<li>□ 是否支持所有目标操作？</li>
+</ul>
+<h3 id="_10">可维护性</h3>
+<ul>
+<li>[ ] <strong>代码质量</strong></li>
+<li>□ IR设计是否清晰？</li>
+<li>□ 优化pass是否模块化？</li>
+<li>
+<p>□ 是否有充分的文档和注释？</p>
+</li>
+<li>
+<p>[ ] <strong>调试支持</strong></p>
+</li>
+<li>□ 是否能生成可读的中间代码？</li>
+<li>□ 是否支持分步调试？</li>
+<li>
+<p>□ 性能分析工具是否完备？</p>
+</li>
+<li>
+<p>[ ] <strong>扩展性</strong></p>
+</li>
+<li>□ 是否易于添加新的优化pass？</li>
+<li>□ 是否支持新的硬件特性？</li>
+<li>□ 是否有版本兼容性考虑？</li>
+</ul>
+            </article>
+            
+            <nav class="page-nav"><a href="chapter11.html" class="nav-link prev">← 第11章：数据流RTL实现</a><a href="chapter13.html" class="nav-link next">第13章：多核扩展与互连 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="./">
+    <title>NPU设计全流程教程：从算法到RTL实现</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/highlight.css">
+    <script src="assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors', 'ams']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors', '[tex]/ams']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" id="sidebar-search-input" placeholder="搜索..." autocomplete="off">
+            </div>
+            <div id="tree-container">
+                <nav class="tree-nav" role="tree">
+                    <div class="tree-item active" >
+                        <a href="index.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">NPU设计全流程教程：从算法到RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter1.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第1章：NPU设计导论</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter2.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第2章：算法与算子分析</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter3.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第3章：量化与稀疏化技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter4.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第4章：存储系统与数据流</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter5.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第5章：脉动阵列原理与设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter6.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第6章：脉动阵列RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter7.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第7章：TPU编译器与映射</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter8.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第8章：脉动阵列验证方法</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter9.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第9章：数据流架构原理</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter10.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第10章：TSP微架构设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter11.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第11章：数据流RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter12.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第12章：TSP编译器技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter13.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第13章：多核扩展与互连</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter14.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第14章：软硬件协同设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter15.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第15章：性能分析与优化</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter16.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第16章：工程实践与部署</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="CLAUDE.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">Untitled</span>
+                        </a>
+                    </div>
+                </nav>
+            </div>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="npurtl">NPU设计全流程教程：从算法到RTL实现</h1>
+<h2 id="_1">课程概述</h2>
+<p>本教程深入探讨神经网络处理器（NPU）的设计全流程，从上游算法映射到RTL实现、验证与仿真。课程聚焦自动驾驶和具身智能两大前沿应用场景，以200 TOPS推理性能为设计目标，支持2:4结构化稀疏和nvfp4量化。通过对比脉动阵列（Systolic Array）和数据流（Dataflow）两种主流架构，结合TPU和Groq TSP的实际案例，帮助读者掌握NPU设计的核心技术。</p>
+<h2 id="_2">目标读者</h2>
+<ul>
+<li>具有深度学习算法背景的工程师</li>
+<li>数字IC设计与验证工程师  </li>
+<li>计算机体系结构研究人员</li>
+<li>AI编译器与系统软件开发者</li>
+</ul>
+<h2 id="_3">预备知识</h2>
+<ul>
+<li>深度学习基础（CNN、Transformer、Attention机制）</li>
+<li>数字电路设计（Verilog/SystemVerilog）</li>
+<li>计算机体系结构（流水线、存储层次、并行计算）</li>
+<li>线性代数与矩阵运算</li>
+</ul>
+<hr />
+<h2 id="_4">第一部分：基础篇</h2>
+<h3 id="1npu"><a href="chapter1.html">第1章：NPU设计导论</a></h3>
+<ol>
+<li>NPU vs GPU vs CPU：架构特征对比</li>
+<li>推理加速的关键指标：延迟、吞吐量、能效</li>
+<li>自动驾驶场景：感知、预测、规划算法需求</li>
+<li>具身智能场景：VLM/VLA模型特征</li>
+<li>200 TOPS设计空间探索</li>
+<li><strong>练习重点</strong>：屋顶线模型(Roofline Model)分析</li>
+</ol>
+<h3 id="2"><a href="chapter2.html">第2章：算法与算子分析</a></h3>
+<ol>
+<li>自动驾驶核心网络剖析
+   - 2D检测：YOLO系列、CenterNet
+   - 3D检测：PointPillars、CenterPoint
+   - BEV感知：BEVFormer、BEVDet
+   - 轨迹预测与规划网络</li>
+<li>VLM/VLA工作负载特征
+   - CLIP与对比学习
+   - LLaVA、Flamingo多模态架构
+   - RT-1/RT-2机器人控制模型</li>
+<li>算子级性能分析
+   - GEMM、Conv2D、Attention计算密度
+   - Memory-bound vs Compute-bound分析</li>
+<li><strong>练习重点</strong>：算子融合优化策略</li>
+</ol>
+<h3 id="3"><a href="chapter3.html">第3章：量化与稀疏化技术</a></h3>
+<ol>
+<li>nvfp4 (E2M1)数值系统
+   - 动态范围与精度权衡
+   - 指数偏置选择策略
+   - Gradual underflow处理</li>
+<li>2:4结构化稀疏
+   - 稀疏模式约束与压缩率
+   - 稀疏索引编码方案
+   - 与非结构化稀疏对比</li>
+<li>量化感知训练(QAT)与后训练量化(PTQ)</li>
+<li>混合精度策略与敏感层识别</li>
+<li><strong>练习重点</strong>：量化误差传播分析</li>
+</ol>
+<h3 id="4"><a href="chapter4.html">第4章：存储系统与数据流</a></h3>
+<ol>
+<li>存储层次设计
+   - 片上SRAM vs HBM vs DDR
+   - 存储带宽需求计算
+   - Bank冲突与访问模式优化</li>
+<li>数据重用模式
+   - Temporal vs Spatial重用
+   - Loop tiling与blocking策略
+   - Dataflow分类：WS/OS/RS</li>
+<li>DMA设计与数据预取</li>
+<li>片上网络(NoC)基础</li>
+<li><strong>练习重点</strong>：带宽利用率计算</li>
+</ol>
+<hr />
+<h2 id="tpu">第二部分：脉动阵列架构（以TPU为例）</h2>
+<h3 id="5"><a href="chapter5.html">第5章：脉动阵列原理与设计</a></h3>
+<ol>
+<li>脉动阵列基本概念
+   - 数据流动与计算同步
+   - Weight-stationary设计选择
+   - 阵列维度与利用率分析</li>
+<li>TPU v1-v4i架构演进
+   - MXU (Matrix Multiply Unit)设计
+   - 向量单元与标量单元
+   - 双缓冲与流水线设计</li>
+<li>控制流与指令集
+   - VLIW vs MIMD vs SIMD
+   - 指令调度与依赖管理</li>
+<li><strong>练习重点</strong>：脉动阵列利用率优化</li>
+</ol>
+<h3 id="6rtl"><a href="chapter6.html">第6章：脉动阵列RTL实现</a></h3>
+<ol>
+<li>PE (Processing Element)设计
+   - MAC单元与累加器
+   - 权重寄存器与控制逻辑
+   - 时序收敛策略</li>
+<li>阵列级互连
+   - 数据广播网络
+   - 部分和传递链
+   - Skew buffer设计</li>
+<li>控制器设计
+   - FSM状态机设计
+   - Counter chain与地址生成
+   - 异常处理与边界情况</li>
+<li><strong>练习重点</strong>：RTL时序分析与优化</li>
+</ol>
+<h3 id="7tpu"><a href="chapter7.html">第7章：TPU编译器与映射</a></h3>
+<ol>
+<li>XLA编译流程
+   - HLO (High-Level Optimizer)图优化
+   - 算子融合与内存规划
+   - Tiling策略与参数选择</li>
+<li>矩阵乘法映射
+   - 大矩阵分块策略
+   - Padding与对齐要求
+   - 批处理维度处理</li>
+<li>卷积映射优化
+   - Im2col vs Direct convolution
+   - Winograd变换适用性
+   - Depthwise/Pointwise分解</li>
+<li><strong>练习重点</strong>：映射效率分析</li>
+</ol>
+<h3 id="8"><a href="chapter8.html">第8章：脉动阵列验证方法</a></h3>
+<ol>
+<li>功能验证策略
+   - 单元测试vs系统测试
+   - 定向测试vs随机测试
+   - 覆盖率驱动验证</li>
+<li>性能验证
+   - Cycle-accurate模拟器
+   - 性能计数器设计
+   - 瓶颈分析方法</li>
+<li>数值验证
+   - Bit-accurate参考模型
+   - 误差累积分析
+   - Corner case测试</li>
+<li><strong>练习重点</strong>：验证计划制定</li>
+</ol>
+<hr />
+<h2 id="groq-tsp">第三部分：数据流架构（以Groq TSP为例）</h2>
+<h3 id="9"><a href="chapter9.html">第9章：数据流架构原理</a></h3>
+<ol>
+<li>数据流计算模型
+   - 静态vs动态数据流
+   - Token-based执行
+   - 确定性执行优势</li>
+<li>Groq TSP架构特征
+   - 无外部DRAM设计理念
+   - 编译时调度
+   - 确定性延迟保证</li>
+<li>与脉动阵列对比
+   - 灵活性vs效率权衡
+   - 编程模型差异
+   - 适用场景分析</li>
+<li><strong>练习重点</strong>：数据流图构建与分析</li>
+</ol>
+<h3 id="10tsp"><a href="chapter10.html">第10章：TSP微架构设计</a></h3>
+<ol>
+<li>计算单元设计
+   - Vector ALU阵列
+   - Matrix multiplication unit
+   - 特殊函数单元(SFU)</li>
+<li>片上存储系统
+   - 分布式SRAM banks
+   - 地址生成与仲裁
+   - Multi-casting机制</li>
+<li>片上网络设计
+   - 2D mesh拓扑
+   - 路由算法与死锁避免
+   - 虚通道与流控</li>
+<li><strong>练习重点</strong>：NoC带宽与延迟计算</li>
+</ol>
+<h3 id="11rtl"><a href="chapter11.html">第11章：数据流RTL实现</a></h3>
+<ol>
+<li>流处理器设计
+   - 指令解码与发射
+   - 操作数收集与转发
+   - 背压处理机制</li>
+<li>同步与调度
+   - 全局同步机制
+   - Credit-based流控
+   - Stall处理策略</li>
+<li>功耗优化技术
+   - Clock gating
+   - Power gating
+   - DVFS支持</li>
+<li><strong>练习重点</strong>：流水线hazard分析</li>
+</ol>
+<h3 id="12tsp"><a href="chapter12.html">第12章：TSP编译器技术</a></h3>
+<ol>
+<li>静态调度算法
+   - 指令调度与资源分配
+   - 寄存器分配策略
+   - 内存布局优化</li>
+<li>数据流图优化
+   - 公共子表达式消除
+   - 死代码消除
+   - 循环优化技术</li>
+<li>自动并行化
+   - 数据并行识别
+   - 流水线并行
+   - 模型并行策略</li>
+<li><strong>练习重点</strong>：调度算法复杂度分析</li>
+</ol>
+<hr />
+<h2 id="_5">第四部分：系统集成与优化</h2>
+<h3 id="13"><a href="chapter13.html">第13章：多核扩展与互连</a></h3>
+<ol>
+<li>Scale-up架构
+   - 多芯片互连技术
+   - Cache一致性协议
+   - NUMA效应与优化</li>
+<li>Scale-out架构<br />
+   - 分布式训练vs推理
+   - 参数服务器vs AllReduce
+   - 梯度压缩与量化</li>
+<li>芯片间互连
+   - NVLink/CXL/UCIe对比
+   - 拓扑选择：Ring/Mesh/Torus
+   - 集合通信优化</li>
+<li><strong>练习重点</strong>：多核性能建模</li>
+</ol>
+<h3 id="14"><a href="chapter14.html">第14章：软硬件协同设计</a></h3>
+<ol>
+<li>硬件抽象层(HAL)设计
+   - 驱动接口定义
+   - 内存管理接口
+   - 同步原语实现</li>
+<li>运行时系统
+   - 任务调度器设计
+   - 内存分配器
+   - 性能profiling接口</li>
+<li>调试与诊断
+   - Hardware trace机制
+   - Performance counter
+   - Error reporting系统</li>
+<li><strong>练习重点</strong>：API设计最佳实践</li>
+</ol>
+<h3 id="15"><a href="chapter15.html">第15章：性能分析与优化</a></h3>
+<ol>
+<li>性能建模方法
+   - Analytical model
+   - Cycle-level simulation
+   - ML-based预测</li>
+<li>瓶颈识别技术
+   - Roofline分析
+   - Critical path分析
+   - 资源利用率分析</li>
+<li>优化案例研究
+   - Attention优化：Flash Attention
+   - 卷积优化：Implicit GEMM
+   - 激活函数融合</li>
+<li><strong>练习重点</strong>：性能优化决策树</li>
+</ol>
+<h3 id="16"><a href="chapter16.html">第16章：工程实践与部署</a></h3>
+<ol>
+<li>芯片bring-up流程
+   - 功能验证检查清单
+   - 性能验证与校准
+   - 可靠性测试</li>
+<li>量产考虑
+   - 良率分析与binning
+   - 功耗分级
+   - 热设计与散热</li>
+<li>实际部署案例
+   - 数据中心部署
+   - 边缘端部署
+   - 车载部署要求</li>
+<li><strong>练习重点</strong>：部署检查清单</li>
+</ol>
+<hr />
+<h2 id="_6">附录</h2>
+<h3 id="a"><a href="appendix_a.html">附录A：数学基础回顾</a></h3>
+<ul>
+<li>线性代数要点</li>
+<li>数值分析基础</li>
+<li>概率论与信息论</li>
+</ul>
+<h3 id="b"><a href="appendix_b.html">附录B：常用算子参考</a></h3>
+<ul>
+<li>GEMM变体详解</li>
+<li>卷积算子变体</li>
+<li>注意力机制变体</li>
+</ul>
+<h3 id="c"><a href="appendix_c.html">附录C：工具链使用指南</a></h3>
+<ul>
+<li>RTL仿真工具</li>
+<li>性能分析工具</li>
+<li>编译器工具链</li>
+</ul>
+<h3 id="d"><a href="appendix_d.html">附录D：术语表</a></h3>
+<ul>
+<li>中英文术语对照</li>
+<li>缩略语列表</li>
+</ul>
+<hr />
+<h2 id="_7">学习路径建议</h2>
+<h3 id="4_1">快速路径（4周）</h3>
+<ul>
+<li>第1、3、5、9章：核心概念</li>
+<li>第6、11章（选读）：RTL要点</li>
+<li>第15章：性能优化</li>
+</ul>
+<h3 id="8_1">标准路径（8周）</h3>
+<ul>
+<li>第一部分：基础篇（2周）</li>
+<li>第二部分或第三部分（3周，二选一）</li>
+<li>第四部分：系统集成（2周）</li>
+<li>实践项目（1周）</li>
+</ul>
+<h3 id="12">深入路径（12周）</h3>
+<ul>
+<li>完整阅读所有章节</li>
+<li>完成所有练习题</li>
+<li>实现mini项目</li>
+<li>参与开源项目</li>
+</ul>
+<h2 id="_8">配套资源</h2>
+<ul>
+<li>代码仓库：示例RTL代码、验证环境</li>
+<li>在线仿真平台：免费FPGA验证环境</li>
+<li>论坛社区：技术交流与答疑</li>
+<li>视频课程：重点章节配套讲解</li>
+</ul>
+<hr />
+<p><em>本教程持续更新中，欢迎反馈与贡献</em></p>
+            </article>
+            
+            <nav class="page-nav"><a href="chapter1.html" class="nav-link next">第1章：NPU设计导论 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>

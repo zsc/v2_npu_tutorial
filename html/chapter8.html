@@ -1,0 +1,1684 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="./">
+    <title>第8章：脉动阵列验证方法</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/highlight.css">
+    <script src="assets/script.js" defer></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']],
+                processEscapes: false,
+                packages: {'[+]': ['noerrors', 'ams']}
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            },
+            loader: {
+                load: ['[tex]/noerrors', '[tex]/ams']
+            }
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <nav id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h3>目录</h3>
+                <button id="sidebar-toggle" class="sidebar-toggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" id="sidebar-search-input" placeholder="搜索..." autocomplete="off">
+            </div>
+            <div id="tree-container">
+                <nav class="tree-nav" role="tree">
+                    <div class="tree-item " >
+                        <a href="index.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">NPU设计全流程教程：从算法到RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter1.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第1章：NPU设计导论</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter2.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第2章：算法与算子分析</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter3.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第3章：量化与稀疏化技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter4.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第4章：存储系统与数据流</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter5.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第5章：脉动阵列原理与设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter6.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第6章：脉动阵列RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter7.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第7章：TPU编译器与映射</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item active" >
+                        <a href="chapter8.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第8章：脉动阵列验证方法</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter9.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第9章：数据流架构原理</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter10.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第10章：TSP微架构设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter11.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第11章：数据流RTL实现</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter12.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第12章：TSP编译器技术</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter13.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第13章：多核扩展与互连</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter14.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第14章：软硬件协同设计</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter15.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第15章：性能分析与优化</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="chapter16.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">第16章：工程实践与部署</span>
+                        </a>
+                    </div>
+                
+                    <div class="tree-item " >
+                        <a href="CLAUDE.html" class="tree-link">
+                            <span class="tree-icon">📄</span>
+                            <span class="tree-title">Untitled</span>
+                        </a>
+                    </div>
+                </nav>
+            </div>
+        </nav>
+        
+        <main class="content">
+            <article>
+                <h1 id="8">第8章：脉动阵列验证方法</h1>
+<p>脉动阵列作为TPU的核心计算引擎，其正确性和性能直接决定了整个NPU系统的成败。本章深入探讨脉动阵列的验证方法学，涵盖功能验证、性能验证和数值精度验证三个维度。我们将学习如何构建层次化的验证环境，设计有效的测试策略，以及如何通过各种验证技术确保设计满足规格要求。对于200 TOPS级别的NPU设计，验证工作量往往占据项目周期的60%以上，因此掌握系统化的验证方法至关重要。</p>
+<h2 id="1">1. 功能验证策略</h2>
+<p>脉动阵列的功能验证是确保设计正确性的第一道防线。对于200 TOPS级别的NPU，脉动阵列通常包含数千个PE单元，验证复杂度极高。功能验证需要系统地覆盖从单个PE到完整系统的各个层级，确保数据流、控制流和时序关系的正确性。本节将详细介绍层次化验证方法、测试策略设计以及验证环境构建的最佳实践。</p>
+<h3 id="11">1.1 验证层次划分</h3>
+<p>脉动阵列的验证需要采用自底向上的层次化策略，确保每个层级的正确性：</p>
+<p><strong>单元级验证（Unit Level）</strong></p>
+<p>PE单元作为脉动阵列的基本计算单元，其正确性至关重要：</p>
+<ul>
+<li><strong>MAC运算验证</strong>：验证乘累加运算的算术正确性，包括有符号/无符号运算、溢出处理、饱和逻辑</li>
+<li><strong>累加器管理</strong>：验证累加器的清零、累加、读出时序，特别是流水线深度的影响</li>
+<li><strong>寄存器功能</strong>：验证权重寄存器的加载、保持、更新机制，确保weight-stationary正确实现</li>
+<li><strong>数据通路</strong>：验证输入数据的传递路径，包括向下一个PE的转发逻辑</li>
+</ul>
+<p>控制单元决定整个阵列的执行流程：</p>
+<ul>
+<li><strong>FSM状态机</strong>：验证IDLE、CONFIG、COMPUTE、DRAIN等状态的转换条件和输出信号</li>
+<li><strong>计数器链</strong>：验证循环计数器的嵌套关系，确保维度遍历的正确性</li>
+<li><strong>地址生成</strong>：验证存储访问地址的计算，包括stride、padding、循环边界处理</li>
+<li><strong>异常处理</strong>：验证非法配置、访问越界等异常情况的检测和处理</li>
+</ul>
+<p>接口单元确保与外部模块的正确交互：</p>
+<ul>
+<li><strong>AXI协议</strong>：验证读写事务的握手时序、burst传输、outstanding事务管理</li>
+<li><strong>数据对齐</strong>：验证非对齐访问的处理，字节使能信号的生成</li>
+<li><strong>流控机制</strong>：验证反压(backpressure)信号的传播，防止数据丢失</li>
+</ul>
+<p><strong>模块级验证（Module Level）</strong></p>
+<p>子阵列验证关注局部计算的正确性：</p>
+<ul>
+<li><strong>$N \times N$ 子阵列</strong>：验证小规模阵列的完整功能，如$4 \times 4$、$8 \times 8$阵列</li>
+<li><strong>数据流动模式</strong>：验证systolic、output-stationary、weight-stationary等不同数据流</li>
+<li><strong>部分和传递</strong>：验证垂直方向的部分和累加链，确保计算结果的正确聚合</li>
+<li><strong>边界处理</strong>：验证阵列边缘的特殊处理逻辑，如输入注入、输出收集</li>
+</ul>
+<p>数据通路模块验证：</p>
+<ul>
+<li><strong>权重加载路径</strong>：验证权重的广播树结构，确保所有PE接收正确权重</li>
+<li><strong>Double buffering</strong>：验证乒乓缓冲的切换逻辑，实现计算与数据传输的重叠</li>
+<li><strong>激活值路径</strong>：验证激活值的斜向注入(diagonal injection)，保证数据对齐</li>
+<li><strong>Skew buffer</strong>：验证数据倾斜缓冲器的延迟匹配，确保同步到达</li>
+</ul>
+<p><strong>系统级验证（System Level）</strong></p>
+<p>完整系统验证确保端到端功能：</p>
+<ul>
+<li><strong>完整脉动阵列</strong>：验证$32 \times 32$或更大规模阵列的矩阵运算</li>
+<li><strong>大矩阵分块</strong>：验证tiling策略，包括K维累加、输出块的拼接</li>
+<li><strong>与存储系统集成</strong>：验证DMA配置、数据预取、多级缓存的协同工作</li>
+<li><strong>多阵列协同</strong>：验证多个脉动阵列的并行执行、同步机制、结果归约</li>
+</ul>
+<p>系统集成验证：</p>
+<ul>
+<li><strong>中断处理</strong>：验证计算完成中断、错误中断的产生和响应</li>
+<li><strong>电源管理</strong>：验证动态电压频率调节(DVFS)、时钟门控、电源域切换</li>
+<li><strong>调试接口</strong>：验证性能计数器、断点设置、单步执行等调试功能</li>
+</ul>
+<h3 id="12">1.2 定向测试设计</h3>
+<p>定向测试针对特定功能点和边界条件，确保设计的基本正确性。这些测试用例需要精心设计，既要覆盖典型使用场景，又要触发潜在的边界问题。</p>
+<p><strong>基本功能测试</strong></p>
+<p>矩阵维度测试策略需要系统覆盖各种规模：</p>
+<div class="codehilite"><pre><span></span><code>测试矩阵维度分类：
+
+1. 最小矩阵：1×1×1，验证退化情况
+2. 小于阵列：M,K,N &lt; P，验证未充分利用情况
+3. 等于阵列：M=K=N=P，验证完美匹配
+4. 轻微超出：M,K,N = P+1，验证最小分块
+5. 2的幂次：N = {1,2,4,8,16,32,64,128,256}
+6. 质数维度：N = {13,17,23,31,37}，最难对齐
+7. 实际层维度：来自ResNet、BERT的真实层参数
+</code></pre></div>
+
+<p>针对200 TOPS系统的典型配置（$32 \times 32$阵列）：</p>
+<ul>
+<li>完美对齐：$M=K=N=32k$，其中$k \in {1,2,3,4}$</li>
+<li>轻微非对齐：$M=32k+1$，触发padding逻辑</li>
+<li>严重非对齐：$M=32k+31$，最大padding开销</li>
+<li>混合非对齐：$M=32k+7, K=32j+13, N=32i+19$</li>
+</ul>
+<p><strong>数据模式测试</strong></p>
+<p>精心设计的数据模式可以快速定位错误：</p>
+<ol>
+<li>
+<p><strong>诊断模式</strong>：
+   - 单位矩阵$I$：$C = A \times I = A$，验证数据传递
+   - 对角矩阵：验证特定数据路径
+   - 上/下三角矩阵：验证条件执行逻辑</p>
+</li>
+<li>
+<p><strong>压力模式</strong>：
+   - 全零矩阵：验证零值优化和特殊处理
+   - 全一矩阵：验证累加器不溢出
+   - 最大值矩阵：验证饱和逻辑
+   - 交替符号：$[+max, -max, +max, ...]$，最大动态范围</p>
+</li>
+<li>
+<p><strong>调试友好模式</strong>：</p>
+</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1000</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">j</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">行列编码</span><span class="err">，</span><span class="n">便于追踪</span>
+<span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">j</span><span class="p">)</span><span class="w"> </span><span class="vm">?</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="err">:</span><span class="w"> </span><span class="mi">0</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">单位矩阵</span>
+<span class="n">期望</span><span class="err">：</span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1000</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">j</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="n">易于验证</span>
+</code></pre></div>
+
+<ol start="4">
+<li><strong>棋盘模式</strong>（检测串扰）：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>Pattern A: [1,0,1,0,...]
+Pattern B: [0,1,0,1,...]
+验证相邻PE之间无数据污染
+</code></pre></div>
+
+<p><strong>时序关系验证</strong></p>
+<p>脉动阵列的时序关系决定了计算的正确性：</p>
+<p>对于$P \times P$脉动阵列执行$M \times K \times N$矩阵乘法：</p>
+<ol>
+<li>
+<p><strong>启动延迟（Startup Latency）</strong>：
+   - 权重加载：$T_{weight} = P$ cycles（广播到所有列）
+   - 数据注入：$T_{inject} = P-1$ cycles（斜向注入）
+   - 首个有效输出：$T_{first} = 2P-1$ cycles</p>
+</li>
+<li>
+<p><strong>稳态吞吐量（Steady-State Throughput）</strong>：
+   - 理想情况：每周期$P$个输出
+   - 实际吞吐量受限于：$\min(P, M_{remaining}, N_{remaining})$</p>
+</li>
+<li>
+<p><strong>排空延迟（Drain Latency）</strong>：
+   - 最后输入到最后输出：$T_{drain} = 2P-1$ cycles
+   - 部分和传递完成：额外$P$ cycles</p>
+</li>
+<li>
+<p><strong>关键时序验证点</strong>：</p>
+</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>时刻T=0: 开始权重加载
+时刻T=P: 权重就绪，开始数据注入
+时刻T=2P-1: 首个输出出现在(0,0)位置
+时刻T=2P: 第二个输出出现在(0,1)和(1,0)
+时刻T=3P-2: 对角线输出达到稳态
+时刻T=M+K+N-2: 最后一个输入进入
+时刻T=M+K+N+2P-3: 最后一个输出产生
+</code></pre></div>
+
+<p><strong>控制流测试</strong></p>
+<p>验证各种控制场景的正确处理：</p>
+<ol>
+<li>
+<p><strong>正常流程</strong>：
+   - 配置→加载→计算→读出的完整流程
+   - 多次连续计算without重新配置
+   - 流水线执行多个矩阵乘法</p>
+</li>
+<li>
+<p><strong>中断处理</strong>：
+   - 计算中途暂停和恢复
+   - 紧急停止(emergency stop)
+   - 错误恢复机制</p>
+</li>
+<li>
+<p><strong>边界条件</strong>：
+   - K=0的退化矩阵乘法
+   - 单行/单列矩阵
+   - 超大矩阵（&gt;64K维度）的地址翻转</p>
+</li>
+</ol>
+<h3 id="13">1.3 随机测试策略</h3>
+<p>随机测试是发现深层次bug的重要手段，特别是那些在定向测试中难以预见的组合场景。关键在于设计合理的约束和有效的覆盖率模型。</p>
+<p><strong>约束随机验证（Constrained Random Verification）</strong></p>
+<p>随机测试生成器的约束设计需要平衡覆盖率和效率：</p>
+<div class="codehilite"><pre><span></span><code>基础维度约束：
+1 ≤ M, K, N ≤ 4096  // 覆盖实际应用范围
+权重分布：
+
+- 70%: 常见维度 [32, 64, 128, 256, 512, 1024]
+- 20%: 边界情况 [1, P-1, P, P+1, 2P-1, 2P, 2P+1]
+- 10%: 随机维度，包括质数
+
+对齐约束（以P=32为例）：
+M % 32 的分布：
+
+- 40%: 0 (完美对齐)
+- 20%: 1 (最小非对齐)
+- 20%: 31 (最大非对齐)
+- 10%: 16 (半对齐)
+- 10%: 其他随机值
+</code></pre></div>
+
+<p><strong>分层随机策略</strong></p>
+<p>采用分层方法提高随机测试效率：</p>
+<ol>
+<li><strong>参数空间分层</strong>：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>Layer 1: 维度组合 (M, K, N)
+Layer 2: 数据分布 (uniform, gaussian, sparse)
+Layer 3: 数值范围 (full range, small values, boundary values)
+Layer 4: 执行模式 (continuous, interrupted, pipelined)
+</code></pre></div>
+
+<ol start="2">
+<li>
+<p><strong>场景权重调整</strong>：
+   - 初期：均匀分布，广泛探索
+   - 中期：根据bug分布调整权重
+   - 后期：聚焦在高bug密度区域</p>
+</li>
+<li>
+<p><strong>智能约束求解</strong>：</p>
+</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="err">使用</span><span class="n">SystemVerilog约束</span><span class="err">：</span>
+<span class="n">constraint</span><span class="w"> </span><span class="n">matrix_dims</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="err">基础约束</span>
+<span class="w">  </span><span class="n">M</span><span class="w"> </span><span class="n">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="p">:</span><span class="mi">4096</span><span class="p">]};</span>
+<span class="w">  </span><span class="n">K</span><span class="w"> </span><span class="n">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="p">:</span><span class="mi">4096</span><span class="p">]};</span>
+<span class="w">  </span><span class="n">N</span><span class="w"> </span><span class="n">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="p">:</span><span class="mi">4096</span><span class="p">]};</span>
+
+<span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="err">相关性约束</span>
+<span class="w">  </span><span class="p">(</span><span class="n">M</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1000</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">K</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span><span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="err">大</span><span class="n">M配小K</span><span class="err">，测试极端长宽比</span>
+
+<span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="err">分布约束</span>
+<span class="w">  </span><span class="n">M</span><span class="w"> </span><span class="n">dist</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="mi">32</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">64</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">128</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">256</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">512</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">1024</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">31</span><span class="p">]</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">33</span><span class="p">:</span><span class="mi">63</span><span class="p">]</span><span class="w"> </span><span class="p">:</span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>覆盖率驱动验证</strong></p>
+<p>建立多维度的覆盖率模型：</p>
+<ol>
+<li><strong>功能覆盖率（Functional Coverage）</strong></li>
+</ol>
+<p>维度交叉覆盖：</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">covergroup</span><span class="w"> </span><span class="nt">matrix_dims_cg</span><span class="o">;</span>
+<span class="w">  </span><span class="nt">M_cp</span><span class="o">:</span><span class="w"> </span><span class="nt">coverpoint</span><span class="w"> </span><span class="nt">M</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">bins</span><span class="w"> </span><span class="err">small</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">{</span><span class="cp">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">31</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">aligned</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="err">32,</span><span class="w"> </span><span class="err">64,</span><span class="w"> </span><span class="err">96,</span><span class="w"> </span><span class="err">128</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">large</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="cp">[</span><span class="mi">256</span><span class="p">:</span><span class="mi">4096</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">  </span><span class="err">}</span>
+<span class="w">  </span><span class="nt">K_cp</span><span class="o">:</span><span class="w"> </span><span class="nt">coverpoint</span><span class="w"> </span><span class="nt">K</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">bins</span><span class="w"> </span><span class="err">small</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">{</span><span class="cp">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">31</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">medium</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="cp">[</span><span class="mi">32</span><span class="p">:</span><span class="mi">255</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">large</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="cp">[</span><span class="mi">256</span><span class="p">:</span><span class="mi">4096</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">  </span><span class="err">}</span>
+<span class="w">  </span><span class="nt">N_cp</span><span class="o">:</span><span class="w"> </span><span class="nt">coverpoint</span><span class="w"> </span><span class="nt">N</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">bins</span><span class="w"> </span><span class="err">small</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">{</span><span class="cp">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">31</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">medium</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="cp">[</span><span class="mi">32</span><span class="p">:</span><span class="mi">255</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">    </span><span class="nt">bins</span><span class="w"> </span><span class="nt">large</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="cp">[</span><span class="mi">256</span><span class="p">:</span><span class="mi">4096</span><span class="cp">]</span><span class="p">}</span><span class="o">;</span>
+<span class="w">  </span><span class="err">}</span>
+<span class="w">  </span><span class="o">//</span><span class="w"> </span><span class="nt">三维交叉</span>
+<span class="w">  </span><span class="nt">cross</span><span class="w"> </span><span class="nt">M_cp</span><span class="o">,</span><span class="w"> </span><span class="nt">K_cp</span><span class="o">,</span><span class="w"> </span><span class="nt">N_cp</span><span class="o">;</span>
+<span class="nt">endgroup</span>
+</code></pre></div>
+
+<p>数据模式覆盖：</p>
+<ul>
+<li>全零、全一、混合模式</li>
+<li>正数、负数、混合符号</li>
+<li>正规数、非正规数、特殊值(NaN, Inf)</li>
+</ul>
+<p>控制序列覆盖：</p>
+<ul>
+<li>状态转换：所有合法的状态迁移路径</li>
+<li>配置序列：不同配置参数的组合</li>
+<li>异常序列：错误注入和恢复</li>
+</ul>
+<ol start="2">
+<li><strong>代码覆盖率（Code Coverage）</strong></li>
+</ol>
+<p>分级目标设置：</p>
+<ul>
+<li>行覆盖率(Line) &gt; 98%：基本代码路径</li>
+<li>条件覆盖率(Condition) &gt; 95%：分支逻辑</li>
+<li>表达式覆盖率(Expression) &gt; 90%：复杂条件</li>
+<li>FSM覆盖率 = 100%：所有状态必须覆盖</li>
+<li>Toggle覆盖率 &gt; 90%：信号翻转活动</li>
+</ul>
+<p>难覆盖点分析：</p>
+<ul>
+<li>使用覆盖率报告识别死代码</li>
+<li>针对性设计定向用例</li>
+<li>评估是否为不可达代码</li>
+</ul>
+<ol start="3">
+<li><strong>断言覆盖率（Assertion Coverage）</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code>property no_x_propagation;
+  @(posedge clk) disable iff (!rst_n)
+  !$isunknown(pe_output);
+endproperty
+
+assert property(no_x_propagation)
+  else $error(&quot;X propagation detected&quot;);
+
+cover property(no_x_propagation);  // 覆盖断言触发
+</code></pre></div>
+
+<h3 id="14">1.4 验证环境架构</h3>
+<p>采用业界标准的UVM（Universal Verification Methodology）构建层次化、可重用的验证环境。UVM提供了标准化的验证组件和通信机制，大幅提高验证效率和代码重用性。</p>
+<p><strong>UVM验证平台架构</strong></p>
+<p>完整的脉动阵列验证环境包含多个协同工作的组件：</p>
+<div class="codehilite"><pre><span></span><code>┌─────────────────────────────────────────────────────────┐
+│                    Test Environment                      │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────┐                    ┌────────────────┐  │
+│  │  Test Case  │                    │  Config Object │  │
+│  └──────┬──────┘                    └────────────────┘  │
+│         │                                               │
+│  ┌──────▼────────────────────────────────────────────┐  │
+│  │                    ENV (Environment)               │  │
+│  ├────────────────────────────────────────────────────┤  │
+│  │  ┌────────────┐  ┌────────────┐  ┌─────────────┐ │  │
+│  │  │  Agent_In  │  │ Agent_Out  │  │  Scoreboard │ │  │
+│  │  ├────────────┤  ├────────────┤  └─────────────┘ │  │
+│  │  │ Sequencer  │  │  Monitor   │                   │  │
+│  │  │   Driver   │  │            │   ┌─────────────┐ │  │
+│  │  │  Monitor   │  └────────────┘   │  Coverage   │ │  │
+│  │  └────────────┘                   └─────────────┘ │  │
+│  └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                            │
+                    ┌───────▼────────┐
+                    │      DUT        │
+                    │ (Systolic Array)│
+                    └────────────────┘
+</code></pre></div>
+
+<p><strong>关键验证组件详解</strong></p>
+<ol>
+<li><strong>Sequence与Sequencer</strong></li>
+</ol>
+<p>Sequence负责生成有意义的测试激励序列：</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">class</span><span class="w"> </span><span class="nc">gemm_sequence</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="nc">uvm_sequence</span><span class="p">#(</span><span class="n">gemm_transaction</span><span class="p">);</span>
+<span class="w">  </span><span class="k">rand</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">;</span>
+<span class="w">  </span><span class="k">rand</span><span class="w"> </span><span class="n">data_pattern_e</span><span class="w"> </span><span class="n">pattern</span><span class="p">;</span>
+
+<span class="w">  </span><span class="k">constraint</span><span class="w"> </span><span class="n">dims_c</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">m</span><span class="w"> </span><span class="ow">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="o">:</span><span class="mi">1024</span><span class="p">]};</span>
+<span class="w">    </span><span class="n">k</span><span class="w"> </span><span class="ow">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="o">:</span><span class="mi">1024</span><span class="p">]};</span>
+<span class="w">    </span><span class="n">n</span><span class="w"> </span><span class="ow">inside</span><span class="w"> </span><span class="p">{[</span><span class="mi">1</span><span class="o">:</span><span class="mi">1024</span><span class="p">]};</span>
+<span class="w">    </span><span class="c1">// 权重分布控制</span>
+<span class="w">    </span><span class="n">m</span><span class="w"> </span><span class="ow">dist</span><span class="w"> </span><span class="p">{</span><span class="mi">32</span><span class="o">:=</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">64</span><span class="o">:=</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="o">:=</span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="mi">256</span><span class="o">:=</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="mi">1</span><span class="o">:</span><span class="mi">31</span><span class="p">]</span><span class="o">:=</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="mi">257</span><span class="o">:</span><span class="mi">1024</span><span class="p">]</span><span class="o">:=</span><span class="mi">10</span><span class="p">};</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">body</span><span class="p">();</span>
+<span class="w">    </span><span class="n">gemm_transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gemm_transaction</span><span class="o">::</span><span class="n">type_id</span><span class="o">::</span><span class="n">create</span><span class="p">(</span><span class="s">&quot;tr&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 配置事务</span>
+<span class="w">    </span><span class="n">start_item</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">    </span><span class="k">assert</span><span class="p">(</span><span class="n">tr</span><span class="p">.</span><span class="n">randomize</span><span class="p">()</span><span class="w"> </span><span class="k">with</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">local</span><span class="o">::</span><span class="n">m</span><span class="p">;</span>
+<span class="w">      </span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">local</span><span class="o">::</span><span class="n">k</span><span class="p">;</span>
+<span class="w">      </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">local</span><span class="o">::</span><span class="n">n</span><span class="p">;</span>
+<span class="w">      </span><span class="n">tr</span><span class="p">.</span><span class="n">pattern</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">local</span><span class="o">::</span><span class="n">pattern</span><span class="p">;</span>
+<span class="w">    </span><span class="p">});</span>
+<span class="w">    </span><span class="n">finish_item</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">  </span><span class="k">endtask</span>
+<span class="kd">endclass</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>Driver组件</strong></li>
+</ol>
+<p>Driver将高层事务转换为管脚级信号：</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">class</span><span class="w"> </span><span class="nc">systolic_driver</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="nc">uvm_driver</span><span class="p">#(</span><span class="n">gemm_transaction</span><span class="p">);</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="n">systolic_if</span><span class="w"> </span><span class="n">vif</span><span class="p">;</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">run_phase</span><span class="p">(</span><span class="n">uvm_phase</span><span class="w"> </span><span class="n">phase</span><span class="p">);</span>
+<span class="w">    </span><span class="k">forever</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="n">seq_item_port</span><span class="p">.</span><span class="n">get_next_item</span><span class="p">(</span><span class="n">req</span><span class="p">);</span>
+<span class="w">      </span><span class="n">drive_transaction</span><span class="p">(</span><span class="n">req</span><span class="p">);</span>
+<span class="w">      </span><span class="n">seq_item_port</span><span class="p">.</span><span class="n">item_done</span><span class="p">();</span>
+<span class="w">    </span><span class="k">end</span>
+<span class="w">  </span><span class="k">endtask</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">drive_transaction</span><span class="p">(</span><span class="n">gemm_transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// 配置阶段</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">config_m</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="p">;</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">config_k</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="p">;</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">config_n</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">;</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">config_valid</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mb">1&#39;b1</span><span class="p">;</span>
+<span class="w">    </span><span class="p">@(</span><span class="k">posedge</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">clk</span><span class="p">);</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">config_valid</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mb">1&#39;b0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// 权重加载</span>
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">        </span><span class="n">vif</span><span class="p">.</span><span class="n">weight_data</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">weight_matrix</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">];</span>
+<span class="w">        </span><span class="n">vif</span><span class="p">.</span><span class="n">weight_valid</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mb">1&#39;b1</span><span class="p">;</span>
+<span class="w">        </span><span class="p">@(</span><span class="k">posedge</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">clk</span><span class="p">);</span>
+<span class="w">      </span><span class="k">end</span>
+<span class="w">    </span><span class="k">end</span>
+<span class="w">    </span><span class="n">vif</span><span class="p">.</span><span class="n">weight_valid</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mb">1&#39;b0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// 输入数据注入（斜向注入模式）</span>
+<span class="w">    </span><span class="k">fork</span>
+<span class="w">      </span><span class="n">inject_input_data</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">      </span><span class="n">collect_output_data</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">    </span><span class="k">join</span>
+<span class="w">  </span><span class="k">endtask</span>
+<span class="kd">endclass</span>
+</code></pre></div>
+
+<ol start="3">
+<li><strong>Monitor组件</strong></li>
+</ol>
+<p>Monitor被动观察接口信号，收集事务信息：</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">class</span><span class="w"> </span><span class="nc">systolic_monitor</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="nc">uvm_monitor</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="n">systolic_if</span><span class="w"> </span><span class="n">vif</span><span class="p">;</span>
+<span class="w">  </span><span class="n">uvm_analysis_port</span><span class="p">#(</span><span class="n">output_transaction</span><span class="p">)</span><span class="w"> </span><span class="n">ap</span><span class="p">;</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">run_phase</span><span class="p">(</span><span class="n">uvm_phase</span><span class="w"> </span><span class="n">phase</span><span class="p">);</span>
+<span class="w">    </span><span class="k">forever</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="n">output_transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">;</span>
+<span class="w">      </span><span class="n">collect_output</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">      </span><span class="n">ap</span><span class="p">.</span><span class="n">write</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span><span class="w">  </span><span class="c1">// 广播给scoreboard</span>
+<span class="w">    </span><span class="k">end</span>
+<span class="w">  </span><span class="k">endtask</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">collect_output</span><span class="p">(</span><span class="k">output</span><span class="w"> </span><span class="n">output_transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">);</span>
+<span class="w">    </span><span class="p">@(</span><span class="k">posedge</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">clk</span><span class="w"> </span><span class="k">iff</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">output_valid</span><span class="p">);</span>
+<span class="w">    </span><span class="n">tr</span><span class="p">.</span><span class="n">row</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">output_row</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tr</span><span class="p">.</span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">output_col</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tr</span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vif</span><span class="p">.</span><span class="n">output_data</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tr</span><span class="p">.</span><span class="n">timestamp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">$</span><span class="kt">time</span><span class="p">;</span>
+<span class="w">  </span><span class="k">endtask</span>
+<span class="kd">endclass</span>
+</code></pre></div>
+
+<ol start="4">
+<li><strong>Scoreboard组件</strong></li>
+</ol>
+<p>Scoreboard负责结果比对和正确性判断：</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">class</span><span class="w"> </span><span class="nc">systolic_scoreboard</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="nc">uvm_scoreboard</span><span class="p">;</span>
+<span class="w">  </span><span class="n">uvm_tlm_analysis_fifo</span><span class="p">#(</span><span class="n">gemm_transaction</span><span class="p">)</span><span class="w"> </span><span class="n">input_fifo</span><span class="p">;</span>
+<span class="w">  </span><span class="n">uvm_tlm_analysis_fifo</span><span class="p">#(</span><span class="n">output_transaction</span><span class="p">)</span><span class="w"> </span><span class="n">output_fifo</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// 参考模型实例</span>
+<span class="w">  </span><span class="n">systolic_reference_model</span><span class="w"> </span><span class="n">ref_model</span><span class="p">;</span>
+
+<span class="w">  </span><span class="k">task</span><span class="w"> </span><span class="n">run_phase</span><span class="p">(</span><span class="n">uvm_phase</span><span class="w"> </span><span class="n">phase</span><span class="p">);</span>
+<span class="w">    </span><span class="k">forever</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="n">gemm_transaction</span><span class="w"> </span><span class="n">in_tr</span><span class="p">;</span>
+<span class="w">      </span><span class="n">output_transaction</span><span class="w"> </span><span class="n">out_tr</span><span class="p">;</span>
+
+<span class="w">      </span><span class="n">input_fifo</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">in_tr</span><span class="p">);</span>
+
+<span class="w">      </span><span class="c1">// 调用参考模型</span>
+<span class="w">      </span><span class="n">ref_model</span><span class="p">.</span><span class="n">compute</span><span class="p">(</span><span class="n">in_tr</span><span class="p">);</span>
+
+<span class="w">      </span><span class="c1">// 收集所有输出并比对</span>
+<span class="w">      </span><span class="k">repeat</span><span class="p">(</span><span class="n">in_tr</span><span class="p">.</span><span class="n">m</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">in_tr</span><span class="p">.</span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">        </span><span class="n">output_fifo</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">out_tr</span><span class="p">);</span>
+<span class="w">        </span><span class="n">check_result</span><span class="p">(</span><span class="n">out_tr</span><span class="p">,</span><span class="w"> </span><span class="n">ref_model</span><span class="p">.</span><span class="n">get_expected</span><span class="p">(</span><span class="n">out_tr</span><span class="p">.</span><span class="n">row</span><span class="p">,</span><span class="w"> </span><span class="n">out_tr</span><span class="p">.</span><span class="n">col</span><span class="p">));</span>
+<span class="w">      </span><span class="k">end</span>
+<span class="w">    </span><span class="k">end</span>
+<span class="w">  </span><span class="k">endtask</span>
+
+<span class="w">  </span><span class="k">function</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">check_result</span><span class="p">(</span><span class="n">output_transaction</span><span class="w"> </span><span class="n">out_tr</span><span class="p">,</span><span class="w"> </span><span class="kt">real</span><span class="w"> </span><span class="n">expected</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">real</span><span class="w"> </span><span class="n">error_margin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.001</span><span class="p">;</span><span class="w">  </span><span class="c1">// 容错范围</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">abs</span><span class="p">(</span><span class="n">out_tr</span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">expected</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">error_margin</span><span class="p">)</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="no">`uvm_error</span><span class="p">(</span><span class="s">&quot;MISMATCH&quot;</span><span class="p">,</span><span class="w"> </span>
+<span class="w">        </span><span class="p">$</span><span class="n">sformatf</span><span class="p">(</span><span class="s">&quot;Output[%0d][%0d]: Expected %f, Got %f&quot;</span><span class="p">,</span><span class="w"> </span>
+<span class="w">          </span><span class="n">out_tr</span><span class="p">.</span><span class="n">row</span><span class="p">,</span><span class="w"> </span><span class="n">out_tr</span><span class="p">.</span><span class="n">col</span><span class="p">,</span><span class="w"> </span><span class="n">expected</span><span class="p">,</span><span class="w"> </span><span class="n">out_tr</span><span class="p">.</span><span class="n">data</span><span class="p">))</span>
+<span class="w">    </span><span class="k">end</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">begin</span>
+<span class="w">      </span><span class="no">`uvm_info</span><span class="p">(</span><span class="s">&quot;MATCH&quot;</span><span class="p">,</span><span class="w"> </span>
+<span class="w">        </span><span class="p">$</span><span class="n">sformatf</span><span class="p">(</span><span class="s">&quot;Output[%0d][%0d] correct: %f&quot;</span><span class="p">,</span><span class="w"> </span>
+<span class="w">          </span><span class="n">out_tr</span><span class="p">.</span><span class="n">row</span><span class="p">,</span><span class="w"> </span><span class="n">out_tr</span><span class="p">.</span><span class="n">col</span><span class="p">,</span><span class="w"> </span><span class="n">out_tr</span><span class="p">.</span><span class="n">data</span><span class="p">),</span><span class="w"> </span><span class="n">UVM_HIGH</span><span class="p">)</span>
+<span class="w">    </span><span class="k">end</span>
+<span class="w">  </span><span class="k">endfunction</span>
+<span class="kd">endclass</span>
+</code></pre></div>
+
+<p><strong>参考模型实现策略</strong></p>
+<p>参考模型是验证的黄金标准，需要保证绝对正确性：</p>
+<ol>
+<li><strong>C++高性能参考模型</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SystolicRefModel</span><span class="w"> </span><span class="p">{</span>
+<span class="k">private</span><span class="o">:</span>
+<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">weight_stationary</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="o">*</span><span class="n">weight_buffer</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">  </span><span class="kt">void</span><span class="w"> </span><span class="n">configure</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">m</span><span class="p">;</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="p">;</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="p">;</span>
+<span class="w">    </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">array_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="kt">void</span><span class="w"> </span><span class="n">compute_gemm</span><span class="p">(</span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">B</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">C</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 分块计算，模拟硬件行为</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">m_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">m</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">n_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">k_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">mt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">mt</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">m_tiles</span><span class="p">;</span><span class="w"> </span><span class="n">mt</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">nt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">nt</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n_tiles</span><span class="p">;</span><span class="w"> </span><span class="n">nt</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">kt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">kt</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k_tiles</span><span class="p">;</span><span class="w"> </span><span class="n">kt</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">          </span><span class="n">compute_tile</span><span class="p">(</span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="n">B</span><span class="p">,</span><span class="w"> </span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">mt</span><span class="p">,</span><span class="w"> </span><span class="n">nt</span><span class="p">,</span><span class="w"> </span><span class="n">kt</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="kt">void</span><span class="w"> </span><span class="n">compute_tile</span><span class="p">(</span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">B</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">C</span><span class="p">,</span><span class="w"> </span>
+<span class="w">                   </span><span class="kt">int</span><span class="w"> </span><span class="n">mt</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">nt</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">kt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">m_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mt</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">n_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nt</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">k_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kt</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">m_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">m_start</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="p">,</span><span class="w"> </span><span class="n">m</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">n_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">n_start</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">k_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">k_start</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 精确模拟脉动阵列计算顺序</span>
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">m_start</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">m_end</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n_start</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n_end</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_start</span><span class="p">;</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">k_end</span><span class="p">;</span><span class="w"> </span><span class="n">l</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">          </span><span class="n">C</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">j</span><span class="p">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">A</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">l</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">B</span><span class="p">[</span><span class="n">l</span><span class="o">*</span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">j</span><span class="p">];</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>Python快速原型参考模型</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="k">class</span> <span class="nc">SystolicReference</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">array_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;float16&#39;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">array_size</span> <span class="o">=</span> <span class="n">array_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dtype</span> <span class="o">=</span> <span class="n">dtype</span>
+
+    <span class="k">def</span> <span class="nf">compute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">weight_stationary</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        计算矩阵乘法 C = A @ B</span>
+<span class="sd">        A: [M, K], B: [K, N]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">M</span><span class="p">,</span> <span class="n">K</span> <span class="o">=</span> <span class="n">A</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">K2</span><span class="p">,</span> <span class="n">N</span> <span class="o">=</span> <span class="n">B</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">assert</span> <span class="n">K</span> <span class="o">==</span> <span class="n">K2</span><span class="p">,</span> <span class="s2">&quot;矩阵维度不匹配&quot;</span>
+
+        <span class="c1"># 转换数据类型模拟硬件</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="s1">&#39;nvfp4&#39;</span><span class="p">:</span>
+            <span class="n">A</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">quantize_nvfp4</span><span class="p">(</span><span class="n">A</span><span class="p">)</span>
+            <span class="n">B</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">quantize_nvfp4</span><span class="p">(</span><span class="n">B</span><span class="p">)</span>
+
+        <span class="c1"># 分块计算</span>
+        <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">A</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">P</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">array_size</span>
+
+        <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">P</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">P</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">P</span><span class="p">):</span>
+                    <span class="c1"># 提取tile</span>
+                    <span class="n">m_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">P</span><span class="p">,</span> <span class="n">M</span><span class="p">)</span>
+                    <span class="n">n_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="n">P</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span>
+                    <span class="n">k_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">k</span> <span class="o">+</span> <span class="n">P</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+
+                    <span class="n">A_tile</span> <span class="o">=</span> <span class="n">A</span><span class="p">[</span><span class="n">m</span><span class="p">:</span><span class="n">m_end</span><span class="p">,</span> <span class="n">k</span><span class="p">:</span><span class="n">k_end</span><span class="p">]</span>
+                    <span class="n">B_tile</span> <span class="o">=</span> <span class="n">B</span><span class="p">[</span><span class="n">k</span><span class="p">:</span><span class="n">k_end</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span><span class="n">n_end</span><span class="p">]</span>
+
+                    <span class="c1"># 计算并累加</span>
+                    <span class="n">C</span><span class="p">[</span><span class="n">m</span><span class="p">:</span><span class="n">m_end</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span><span class="n">n_end</span><span class="p">]</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">systolic_compute</span><span class="p">(</span>
+                        <span class="n">A_tile</span><span class="p">,</span> <span class="n">B_tile</span><span class="p">,</span> <span class="n">weight_stationary</span>
+                    <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">C</span>
+
+    <span class="k">def</span> <span class="nf">systolic_compute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">A_tile</span><span class="p">,</span> <span class="n">B_tile</span><span class="p">,</span> <span class="n">weight_stationary</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;模拟单个tile的脉动阵列计算&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">weight_stationary</span><span class="p">:</span>
+            <span class="c1"># Weight-stationary数据流</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ws_dataflow</span><span class="p">(</span><span class="n">A_tile</span><span class="p">,</span> <span class="n">B_tile</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Output-stationary数据流</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">os_dataflow</span><span class="p">(</span><span class="n">A_tile</span><span class="p">,</span> <span class="n">B_tile</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">ws_dataflow</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Weight-stationary精确时序模拟&quot;&quot;&quot;</span>
+        <span class="n">M</span><span class="p">,</span> <span class="n">K</span> <span class="o">=</span> <span class="n">A</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">K2</span><span class="p">,</span> <span class="n">N</span> <span class="o">=</span> <span class="n">B</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">))</span>
+
+        <span class="c1"># 模拟逐周期计算</span>
+        <span class="k">for</span> <span class="n">cycle</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span> <span class="o">+</span> <span class="n">K</span> <span class="o">+</span> <span class="n">N</span> <span class="o">-</span> <span class="mi">2</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">N</span><span class="p">):</span>
+                    <span class="c1"># 计算数据到达时间</span>
+                    <span class="n">k_idx</span> <span class="o">=</span> <span class="n">cycle</span> <span class="o">-</span> <span class="n">i</span> <span class="o">-</span> <span class="n">j</span>
+                    <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">k_idx</span> <span class="o">&lt;</span> <span class="n">K</span><span class="p">:</span>
+                        <span class="n">C</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">+=</span> <span class="n">A</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">k_idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">B</span><span class="p">[</span><span class="n">k_idx</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">C</span>
+
+    <span class="k">def</span> <span class="nf">quantize_nvfp4</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;nvfp4量化模拟&quot;&quot;&quot;</span>
+        <span class="c1"># E2M1格式：1位符号，2位指数，1位尾数</span>
+        <span class="n">sign</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sign</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">abs_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="c1"># 计算指数</span>
+        <span class="n">exp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">abs_x</span><span class="p">))</span> <span class="o">+</span> <span class="n">bias</span>
+        <span class="n">exp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">exp</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>  <span class="c1"># 2位指数</span>
+
+        <span class="c1"># 计算尾数</span>
+        <span class="n">mantissa</span> <span class="o">=</span> <span class="n">abs_x</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">exp</span> <span class="o">-</span> <span class="n">bias</span><span class="p">))</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">mantissa</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">mantissa</span> <span class="o">*</span> <span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>  <span class="c1"># 1位尾数</span>
+
+        <span class="c1"># 重构数值</span>
+        <span class="k">return</span> <span class="n">sign</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">mantissa</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">exp</span> <span class="o">-</span> <span class="n">bias</span><span class="p">))</span>
+</code></pre></div>
+
+<p><strong>验证通信机制</strong></p>
+<p>UVM组件间通过TLM（Transaction Level Modeling）端口通信：</p>
+<ol>
+<li>
+<p><strong>Analysis Port机制</strong>
+   - 一对多广播通信
+   - Monitor向多个subscriber广播数据
+   - 用于覆盖率收集和结果检查</p>
+</li>
+<li>
+<p><strong>TLM FIFO</strong>
+   - 组件间缓冲和同步
+   - 处理生产者-消费者速度不匹配
+   - 提供背压(backpressure)机制</p>
+</li>
+<li>
+<p><strong>Configuration Database</strong>
+   - 全局配置参数管理
+   - 层次化配置覆盖
+   - 运行时参数调整</p>
+</li>
+</ol>
+<p><strong>DPI-C接口集成</strong></p>
+<p>使用SystemVerilog DPI-C将C++参考模型集成到UVM环境：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// DPI-C函数声明</span>
+<span class="kn">import</span><span class="w"> </span><span class="err">&quot;</span><span class="nn">DPI</span><span class="o">-</span><span class="n">C</span><span class="s">&quot; function void c_ref_model_init(int array_size);</span>
+<span class="kn">import</span><span class="w"> </span><span class="err">&quot;</span><span class="nn">DPI</span><span class="o">-</span><span class="n">C</span><span class="s">&quot; function void c_ref_model_compute(</span>
+<span class="w">    </span><span class="k">input</span><span class="w"> </span><span class="kt">real</span><span class="w"> </span><span class="n">A</span><span class="p">[],</span><span class="w"> </span><span class="k">input</span><span class="w"> </span><span class="kt">real</span><span class="w"> </span><span class="n">B</span><span class="p">[],</span><span class="w"> </span>
+<span class="w">    </span><span class="k">output</span><span class="w"> </span><span class="kt">real</span><span class="w"> </span><span class="n">C</span><span class="p">[],</span><span class="w"> </span>
+<span class="w">    </span><span class="k">input</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">n</span>
+<span class="p">);</span>
+
+<span class="kd">class</span><span class="w"> </span><span class="nc">dpi_reference_model</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="nc">uvm_object</span><span class="p">;</span>
+<span class="w">  </span><span class="k">function</span><span class="w"> </span><span class="k">new</span><span class="p">(</span><span class="kt">string</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;dpi_reference_model&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">super</span><span class="p">.</span><span class="k">new</span><span class="p">(</span><span class="n">name</span><span class="p">);</span>
+<span class="w">    </span><span class="n">c_ref_model_init</span><span class="p">(</span><span class="mi">32</span><span class="p">);</span><span class="w">  </span><span class="c1">// 初始化32x32阵列</span>
+<span class="w">  </span><span class="k">endfunction</span>
+
+<span class="w">  </span><span class="k">function</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">compute</span><span class="p">(</span><span class="n">gemm_transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">,</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="kt">real</span><span class="w"> </span><span class="n">result</span><span class="p">[]);</span>
+<span class="w">    </span><span class="kt">real</span><span class="w"> </span><span class="n">A</span><span class="p">[],</span><span class="w"> </span><span class="n">B</span><span class="p">[],</span><span class="w"> </span><span class="n">C</span><span class="p">[];</span>
+
+<span class="w">    </span><span class="c1">// 展平矩阵数据</span>
+<span class="w">    </span><span class="n">A</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="p">[</span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="p">];</span>
+<span class="w">    </span><span class="n">B</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="p">[</span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">];</span>
+<span class="w">    </span><span class="n">C</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="p">[</span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">];</span>
+
+<span class="w">    </span><span class="n">flatten_matrix</span><span class="p">(</span><span class="n">tr</span><span class="p">.</span><span class="n">A_matrix</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="p">);</span>
+<span class="w">    </span><span class="n">flatten_matrix</span><span class="p">(</span><span class="n">tr</span><span class="p">.</span><span class="n">B_matrix</span><span class="p">,</span><span class="w"> </span><span class="n">B</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 调用C++模型</span>
+<span class="w">    </span><span class="n">c_ref_model_compute</span><span class="p">(</span><span class="n">A</span><span class="p">,</span><span class="w"> </span><span class="n">B</span><span class="p">,</span><span class="w"> </span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 重组结果</span>
+<span class="w">    </span><span class="n">unflatten_matrix</span><span class="p">(</span><span class="n">C</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="n">n</span><span class="p">);</span>
+<span class="w">  </span><span class="k">endfunction</span>
+<span class="kd">endclass</span>
+</code></pre></div>
+
+<h2 id="2">2. 性能验证</h2>
+<p>性能验证是NPU设计中的关键环节，需要准确评估设计能否达到200 TOPS的目标性能。通过构建精确的性能模型、设置硬件计数器、分析性能瓶颈，我们可以在设计早期发现并解决性能问题。本节将详细介绍性能验证的方法学和实践技术。</p>
+<h3 id="21-cycle-accurate">2.1 Cycle-Accurate模拟器</h3>
+<p>构建周期精确的性能模型是评估脉动阵列性能的基础。模拟器需要精确建模硬件的每个周期行为，包括计算、存储访问、数据传输等所有影响性能的因素。</p>
+<p><strong>性能模型架构</strong></p>
+<p>完整的Cycle-Accurate模拟器包含以下核心组件：</p>
+<div class="codehilite"><pre><span></span><code>┌─────────────────────────────────────────────────┐
+│          Cycle-Accurate Simulator               │
+├─────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌──────────────┐         │
+│  │  Compute     │    │   Memory     │         │
+│  │  Model       │    │   Model      │         │
+│  │  - PE Array  │    │  - SRAM      │         │
+│  │  - Pipeline  │    │  - DRAM      │         │
+│  │  - Dataflow  │    │  - NoC       │         │
+│  └──────┬───────┘    └──────┬───────┘         │
+│         │                    │                  │
+│  ┌──────▼────────────────────▼──────┐         │
+│  │       Timing Model                │         │
+│  │  - Clock domains                  │         │
+│  │  - Synchronization                │         │
+│  │  - Pipeline stages                │         │
+│  └───────────────┬───────────────────┘         │
+│                  │                              │
+│  ┌───────────────▼───────────────────┐         │
+│  │     Performance Statistics        │         │
+│  │  - Cycle counts                   │         │
+│  │  - Utilization                    │         │
+│  │  - Bottleneck analysis            │         │
+│  └───────────────────────────────────┘         │
+└─────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>计算模型精确建模</strong></p>
+<ol>
+<li><strong>PE阵列时序模型</strong></li>
+</ol>
+<p>对于$P \times P$的脉动阵列，需要精确建模每个PE的计算时序：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PEArrayModel</span><span class="w"> </span><span class="p">{</span>
+<span class="k">private</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">pipeline_depth</span><span class="p">;</span>
+<span class="w">    </span><span class="n">vector</span><span class="o">&lt;</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">PEState</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">pe_states</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">PEState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">is_active</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">current_cycle</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">accumulator</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">weight_reg</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">input_reg</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">output_reg</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">cycle_update</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// 更新每个PE的状态</span>
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">PEState</span><span class="o">&amp;</span><span class="w"> </span><span class="n">pe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pe_states</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">];</span>
+
+<span class="w">                </span><span class="k">if</span><span class="p">(</span><span class="n">pe</span><span class="p">.</span><span class="n">is_active</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="c1">// MAC运算</span>
+<span class="w">                    </span><span class="n">pe</span><span class="p">.</span><span class="n">accumulator</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">pe</span><span class="p">.</span><span class="n">weight_reg</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pe</span><span class="p">.</span><span class="n">input_reg</span><span class="p">;</span>
+
+<span class="w">                    </span><span class="c1">// 数据传递（向右和向下）</span>
+<span class="w">                    </span><span class="k">if</span><span class="p">(</span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                        </span><span class="n">pe_states</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="o">+</span><span class="mi">1</span><span class="p">].</span><span class="n">input_reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pe</span><span class="p">.</span><span class="n">input_reg</span><span class="p">;</span>
+<span class="w">                    </span><span class="p">}</span>
+<span class="w">                    </span><span class="k">if</span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                        </span><span class="n">pe_states</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">][</span><span class="n">j</span><span class="p">].</span><span class="n">output_reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pe</span><span class="p">.</span><span class="n">accumulator</span><span class="p">;</span>
+<span class="w">                    </span><span class="p">}</span>
+<span class="w">                </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">current_cycle</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="nf">compute_latency</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">M</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">K</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">N</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// 计算总延迟</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">num_m_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">M</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">num_n_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">N</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">num_k_tiles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">K</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">array_size</span><span class="p">;</span>
+
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">cycles_per_tile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">num_k_tiles</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">pipeline_fill</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">pipeline_drain</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">array_size</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">total_cycles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">num_m_tiles</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">num_n_tiles</span><span class="w"> </span><span class="o">*</span><span class="w"> </span>
+<span class="w">                          </span><span class="p">(</span><span class="n">cycles_per_tile</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pipeline_fill</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pipeline_drain</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">total_cycles</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>流水线深度影响分析</strong></li>
+</ol>
+<p>脉动阵列的流水线深度直接影响性能：</p>
+<div class="codehilite"><pre><span></span><code>流水线阶段分析：
+Stage 1: 指令译码 (1 cycle)
+Stage 2: 地址计算 (1 cycle)  
+Stage 3: 存储读取 (2-3 cycles, 取决于bank冲突)
+Stage 4: 数据对齐 (1 cycle)
+Stage 5: PE计算 (1 cycle MAC)
+Stage 6: 累加更新 (1 cycle)
+Stage 7: 结果写回 (2-3 cycles)
+
+总流水线深度: 9-11 cycles
+</code></pre></div>
+
+<p>对性能的影响：</p>
+<ul>
+<li>首个输出延迟：$T_{first} = Pipeline_{depth} + 2P - 1$</li>
+<li>稳态吞吐量：不受流水线深度影响</li>
+<li>短矩阵惩罚：当$K &lt; Pipeline_{depth}$时，效率急剧下降</li>
+</ul>
+<p><strong>存储系统建模</strong></p>
+<ol>
+<li><strong>多级存储层次时序</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MemoryHierarchy</span><span class="w"> </span><span class="p">{</span>
+<span class="k">private</span><span class="o">:</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">CacheLevel</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">size_kb</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">latency_cycles</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">bandwidth_gbps</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">hit_rate</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">vector</span><span class="o">&lt;</span><span class="n">CacheLevel</span><span class="o">&gt;</span><span class="w"> </span><span class="n">levels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="p">{</span><span class="mi">32</span><span class="p">,</span><span class="w">    </span><span class="mi">1</span><span class="p">,</span><span class="w">   </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="mf">0.95</span><span class="p">},</span><span class="w">  </span><span class="c1">// L0: PE本地寄存器</span>
+<span class="w">        </span><span class="p">{</span><span class="mi">256</span><span class="p">,</span><span class="w">   </span><span class="mi">3</span><span class="p">,</span><span class="w">   </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="mf">0.85</span><span class="p">},</span><span class="w">  </span><span class="c1">// L1: Tile SRAM</span>
+<span class="w">        </span><span class="p">{</span><span class="mi">4096</span><span class="p">,</span><span class="w">  </span><span class="mi">10</span><span class="p">,</span><span class="w">  </span><span class="mi">512</span><span class="p">,</span><span class="w">  </span><span class="mf">0.75</span><span class="p">},</span><span class="w">  </span><span class="c1">// L2: Global SRAM</span>
+<span class="w">        </span><span class="p">{</span><span class="mi">32768</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="mi">256</span><span class="p">,</span><span class="w">  </span><span class="mf">1.0</span><span class="p">}</span><span class="w">    </span><span class="c1">// L3: HBM/DDR</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">access_latency</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">address</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">size</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">total_latency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">level</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">levels</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="p">(</span><span class="n">random</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">level</span><span class="p">.</span><span class="n">hit_rate</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="c1">// 命中当前级别</span>
+<span class="w">                </span><span class="kt">int</span><span class="w"> </span><span class="n">transfer_cycles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">size</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span>
+<span class="w">                    </span><span class="p">(</span><span class="n">level</span><span class="p">.</span><span class="n">bandwidth_gbps</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e9</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">CLOCK_FREQ</span><span class="p">);</span>
+<span class="w">                </span><span class="n">total_latency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">level</span><span class="p">.</span><span class="n">latency_cycles</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">transfer_cycles</span><span class="p">;</span>
+<span class="w">                </span><span class="k">break</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="c1">// 未命中，继续下一级</span>
+<span class="w">            </span><span class="n">total_latency</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">level</span><span class="p">.</span><span class="n">latency_cycles</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">total_latency</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">model_prefetch</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">stride</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// 预取建模</span>
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">count</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="kt">int</span><span class="w"> </span><span class="n">addr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">base_addr</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stride</span><span class="p">;</span>
+<span class="w">            </span><span class="n">prefetch_queue</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">addr</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>Bank冲突建模</strong></li>
+</ol>
+<p>SRAM bank冲突对性能影响显著：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SRAMBankModel</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">NUM_BANKS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">BANK_WIDTH</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w">  </span><span class="c1">// bits</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">BankState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">is_busy</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">busy_until_cycle</span><span class="p">;</span>
+<span class="w">        </span><span class="n">queue</span><span class="o">&lt;</span><span class="n">AccessRequest</span><span class="o">&gt;</span><span class="w"> </span><span class="n">pending_requests</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">BankState</span><span class="w"> </span><span class="n">banks</span><span class="p">[</span><span class="n">NUM_BANKS</span><span class="p">];</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="nf">schedule_access</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">address</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">cycle</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">bank_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">address</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">BANK_WIDTH</span><span class="p">)</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">NUM_BANKS</span><span class="p">;</span>
+<span class="w">        </span><span class="n">BankState</span><span class="o">&amp;</span><span class="w"> </span><span class="n">bank</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">banks</span><span class="p">[</span><span class="n">bank_id</span><span class="p">];</span>
+
+<span class="w">        </span><span class="k">if</span><span class="p">(</span><span class="n">bank</span><span class="p">.</span><span class="n">busy_until_cycle</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">cycle</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// 无冲突</span>
+<span class="w">            </span><span class="n">bank</span><span class="p">.</span><span class="n">busy_until_cycle</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cycle</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">cycle</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Bank冲突，需要等待</span>
+<span class="w">            </span><span class="kt">int</span><span class="w"> </span><span class="n">actual_cycle</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bank</span><span class="p">.</span><span class="n">busy_until_cycle</span><span class="p">;</span>
+<span class="w">            </span><span class="n">bank</span><span class="p">.</span><span class="n">busy_until_cycle</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">actual_cycle</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">            </span><span class="n">conflict_count</span><span class="o">++</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">actual_cycle</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p><strong>数据流模式建模</strong></p>
+<p>不同的数据流模式对性能有显著影响：</p>
+<ol>
+<li><strong>Weight-Stationary (WS)</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="err">优点：权重复用最大化，减少权重加载开销</span>
+<span class="err">缺点：输入</span><span class="o">/</span><span class="err">输出数据流动开销大</span>
+
+<span class="err">性能模型：</span>
+<span class="n">T_ws</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T_weight_load</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">T_compute</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">T_output_collect</span>
+<span class="err">其中：</span>
+
+<span class="o">-</span><span class="w"> </span><span class="n">T_weight_load</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">P</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="p">(</span><span class="n">K</span><span class="o">/</span><span class="n">P</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="w"> </span><span class="n">cycles</span>
+<span class="o">-</span><span class="w"> </span><span class="n">T_compute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">M</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">P²</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">K</span><span class="w"> </span><span class="n">cycles</span><span class="w">  </span>
+<span class="o">-</span><span class="w"> </span><span class="n">T_output_collect</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">M</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="n">cycles</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>Output-Stationary (OS)</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code>优点：部分和保持在PE本地，减少累加开销
+缺点：权重和输入都需要流动
+
+性能模型：
+T_os = T_init + T_compute + T_writeback
+其中：
+
+<span class="k">-</span> T_init = M × N / P² cycles
+<span class="k">-</span> T_compute = K × max(M/P, N/P) cycles
+<span class="k">-</span> T_writeback = M × N / P² cycles
+</code></pre></div>
+
+<ol start="3">
+<li><strong>Row-Stationary (RS)</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="n">优点</span><span class="err">：</span><span class="n">平衡各种数据复用</span>
+<span class="n">缺点</span><span class="err">：</span><span class="n">控制复杂度高</span>
+
+<span class="n">性能模型需要考虑行级数据驻留</span><span class="err">：</span>
+<span class="n">T_rs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Σ</span><span class="p">(</span><span class="n">T_row_compute</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="err">[</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">M</span><span class="o">/</span><span class="n">P</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>关键性能指标计算</strong></p>
+<p>对于矩阵乘法 $C_{M \times N} = A_{M \times K} \times B_{K \times N}$：</p>
+<ol>
+<li><strong>理论性能上界</strong></li>
+</ol>
+<p>理论计算量：$OPS = 2MKN$ (MAC算2个操作)</p>
+<p>理论峰值性能：$TOPS_{peak} = P^2 \times f_{clock} \times 2 \times 10^{-12}$</p>
+<p>对于200 TOPS目标，$32 \times 32$阵列：
+$$f_{clock} = \frac{200 \times 10^{12}}{32^2 \times 2} = 97.7 \text{ GHz}$$
+显然不现实，因此需要多个阵列或更大阵列。</p>
+<ol start="2">
+<li><strong>实际执行时间建模</strong>
+$$T_{actual} = T_{compute} + T_{memory} + T_{control} + T_{sync}$$
+其中：</li>
+</ol>
+<ul>
+<li>$T_{compute} = \lceil \frac{M}{P} \rceil \times \lceil \frac{K}{P} \rceil \times \lceil \frac{N}{P} \rceil \times P$</li>
+<li>$T_{memory} = T_{load_A} + T_{load_B} + T_{store_C}$</li>
+<li>$T_{control} = T_{config} + T_{schedule}$</li>
+<li>$T_{sync} = T_{barrier} \times num_syncs$</li>
+</ul>
+<ol start="3">
+<li><strong>有效利用率计算</strong></li>
+</ol>
+<div class="codehilite"><pre><span></span><code>PE利用率：
+η_PE = 实际活跃PE周期数 / (P² × 总周期数)
+
+对于非对齐矩阵：
+
+<span class="k">-</span> M=100, K=100, N=100, P=32
+<span class="k">-</span> 需要4×4×4=64个tiles
+<span class="k">-</span> 每个tile利用率：(100%32)²/32² = 4²/32² = 1.56%
+<span class="k">-</span> 整体利用率很低！
+</code></pre></div>
+
+<ol start="4">
+<li><strong>算术强度与Roofline分析</strong></li>
+</ol>
+<p>算术强度定义：
+$$AI = \frac{计算量}{数据传输量} = \frac{2MKN}{(MK + KN + MN) \times sizeof(dtype)}$$
+不同矩阵规模的AI值：</p>
+<ul>
+<li>小矩阵 (64×64×64): AI ≈ 21.3 FLOPs/Byte</li>
+<li>中矩阵 (256×256×256): AI ≈ 85.3 FLOPs/Byte  </li>
+<li>大矩阵 (1024×1024×1024): AI ≈ 341.3 FLOPs/Byte</li>
+</ul>
+<p>Roofline转折点：
+$$AI_{balance} = \frac{峰值算力}{存储带宽} = \frac{200 \text{ TFLOPS}}{256 \text{ GB/s}} = 781 \text{ FLOPs/Byte}$$
+大部分实际工作负载都是存储受限！</p>
+<h3 id="22">2.2 性能计数器设计</h3>
+<p>硬件性能计数器用于运行时性能监控：</p>
+<p><strong>基础计数器</strong></p>
+<ul>
+<li>Cycle counter：总执行周期数</li>
+<li>Instruction counter：已执行指令数</li>
+<li>Stall counter：各类停顿周期统计</li>
+</ul>
+<p><strong>脉动阵列专用计数器</strong></p>
+<ul>
+<li>PE利用率：$\frac{\sum PE_{active}}{P^2 \times Cycles}$</li>
+<li>输入带宽利用率：实际带宽/峰值带宽</li>
+<li>输出带宽利用率：有效输出/总输出带宽</li>
+</ul>
+<p><strong>性能事件追踪</strong></p>
+<div class="codehilite"><pre><span></span><code>Event ID | Event Type           | Counter Value
+---------|---------------------|---------------
+0x01     | GEMM_START         | Timestamp
+0x02     | WEIGHT_LOAD_BEGIN  | Cycle count
+0x03     | WEIGHT_LOAD_END    | Cycle count
+0x04     | COMPUTE_BEGIN      | Cycle count
+0x05     | FIRST_OUTPUT       | Cycle count
+0x06     | COMPUTE_END        | Cycle count
+0x07     | MEMORY_STALL       | Stall cycles
+0x08     | BANK_CONFLICT      | Conflict count
+</code></pre></div>
+
+<h3 id="23">2.3 瓶颈分析方法</h3>
+<p><strong>计算瓶颈识别</strong></p>
+<p>判断计算是否为瓶颈：
+$$R_{compute} = \frac{2MKN}{P^2 \times f_{clock}} \quad \text{(计算时间)}$$
+$$R_{memory} = \frac{(MK + KN + MN) \times sizeof(dtype)}{BW_{mem}} \quad \text{(数据传输时间)}$$
+若 $R_{compute} &gt; R_{memory}$，则为计算瓶颈，否则为存储瓶颈。</p>
+<p><strong>Roofline模型分析</strong></p>
+<p>算术强度（Arithmetic Intensity）：
+$$AI = \frac{2MKN}{(MK + KN + MN) \times sizeof(dtype)} \quad \text{(FLOPs/Byte)}$$
+性能上界：
+$$P_{max} = \min(P_{peak}, AI \times BW_{mem})$$
+其中$P_{peak} = P^2 \times f_{clock} \times 2$ (MAC算2个FLOPs)</p>
+<h3 id="24">2.4 性能回归测试</h3>
+<p>建立性能基准库，持续监控性能变化：</p>
+<p><strong>基准测试集</strong></p>
+<ul>
+<li>GEMM扫描：覆盖常见维度组合</li>
+<li>卷积层：ResNet、MobileNet关键层</li>
+<li>Transformer：Attention矩阵乘法</li>
+<li>稀疏矩阵：2:4稀疏模式</li>
+</ul>
+<p><strong>性能回归检测</strong>
+设定性能阈值，自动检测性能下降：</p>
+<ul>
+<li>黄色警告：性能下降 &gt; 3%</li>
+<li>红色警报：性能下降 &gt; 5%</li>
+<li>改进标记：性能提升 &gt; 2%</li>
+</ul>
+<h2 id="3">3. 数值验证</h2>
+<h3 id="31-bit-accurate">3.1 Bit-Accurate参考模型</h3>
+<p>对于nvfp4 (E2M1)量化，需要精确建模数值行为：</p>
+<p><strong>nvfp4数值表示</strong></p>
+<div class="codehilite"><pre><span></span><code>符号位(S) | 指数(E1E0) | 尾数(M0)
+    1     |     2      |    1
+</code></pre></div>
+
+<p>数值计算：
+$$x = (-1)^S \times 2^{E-bias} \times (1 + \frac{M}{2})$$
+其中bias通常为1或2，支持的数值范围：</p>
+<ul>
+<li>最大值：$\pm 6.0$ (当bias=1时)</li>
+<li>最小正规数：$0.5$</li>
+<li>最小非正规数：$0.25$</li>
+</ul>
+<p><strong>量化误差分析</strong></p>
+<p>单次量化的最大相对误差：
+$$\epsilon_{max} = \frac{1}{2^{m+1}} = \frac{1}{4} = 25\%$$
+累积误差（N次累加）：
+$$\epsilon_{accumulated} \approx \sqrt{N} \times \epsilon_{single}$$
+对于$128 \times 128$矩阵乘法，最坏情况误差：
+$$\epsilon_{worst} = 128 \times 0.25 = 32 \times \epsilon_{single}$$</p>
+<h3 id="32">3.2 误差累积分析</h3>
+<p><strong>误差传播模型</strong></p>
+<p>对于脉动阵列中的MAC操作链：
+$$y_n = y_{n-1} + a_n \times b_n$$
+考虑量化误差：
+$$\tilde{y}_n = Q(\tilde{y}_{n-1} + Q(a_n) \times Q(b_n))$$
+误差递推关系：
+$$e_n = e_{n-1} + e_{mult,n} + e_{round,n}$$
+<strong>误差界限估计</strong></p>
+<p>使用概率模型估计误差分布：</p>
+<ul>
+<li>假设量化误差服从均匀分布：$e \sim U(-\frac{\Delta}{2}, \frac{\Delta}{2})$</li>
+<li>累加N次后，根据中心极限定理：$e_{sum} \sim N(0, \frac{N\Delta^2}{12})$</li>
+<li>99.7%置信区间：$|e_{sum}| &lt; 3\sigma = \frac{\sqrt{3N}\Delta}{2}$</li>
+</ul>
+<h3 id="33-corner-case">3.3 Corner Case测试</h3>
+<p><strong>数值极端情况</strong></p>
+<ul>
+<li>下溢处理：结果小于最小可表示数</li>
+<li>上溢处理：结果超出表示范围</li>
+<li>非正规数：渐进下溢(gradual underflow)</li>
+<li>特殊值：零、无穷、NaN的传播</li>
+</ul>
+<p><strong>累加器饱和测试</strong></p>
+<p>对于24位累加器，测试饱和行为：</p>
+<div class="codehilite"><pre><span></span><code>最大累加次数（nvfp4）：
+N_max = 2^24 / max_value = 2^24 / 6 ≈ 2.8M
+</code></pre></div>
+
+<p>实际测试场景：</p>
+<ul>
+<li>K=2048的矩阵乘法：远小于饱和界限</li>
+<li>连续1M次小值累加：测试精度损失</li>
+<li>交替正负大值：测试取消效应</li>
+</ul>
+<p><strong>边界对齐测试</strong></p>
+<p>测试非对齐矩阵维度的正确性：</p>
+<div class="codehilite"><pre><span></span><code>测试矩阵：
+
+- M=17, K=33, N=65：全部需要padding
+- M=16, K=31, N=16：仅K维需要padding
+- M=1, K=1, N=1：最小矩阵
+- M=15, K=15, N=15：接近但不等于阵列大小
+</code></pre></div>
+
+<h3 id="34-24">3.4 2:4稀疏验证</h3>
+<p><strong>稀疏模式验证</strong></p>
+<p>验证2:4结构化稀疏的约束：</p>
+<ul>
+<li>每4个连续元素中恰好2个非零</li>
+<li>稀疏索引正确编码</li>
+<li>压缩/解压缩一致性</li>
+</ul>
+<p><strong>稀疏矩阵乘法验证</strong></p>
+<p>对于稀疏矩阵乘法 $C = A_{sparse} \times B_{dense}$：</p>
+<p>有效计算量：$FLOPS_{effective} = MKN$ (相比稠密减少50%)</p>
+<p>验证要点：</p>
+<ul>
+<li>索引计算正确性</li>
+<li>零值跳过机制</li>
+<li>结果等价性（与稠密计算比较）</li>
+</ul>
+<h2 id="_1">本章小结</h2>
+<p>本章系统介绍了脉动阵列的三层验证方法：</p>
+<p><strong>功能验证要点</strong></p>
+<ul>
+<li>层次化验证策略：单元级→模块级→系统级</li>
+<li>定向测试覆盖边界条件和特殊情况</li>
+<li>随机测试配合覆盖率驱动，提高验证完备性</li>
+<li>UVM验证环境提供可重用的验证架构</li>
+</ul>
+<p><strong>性能验证关键</strong></p>
+<ul>
+<li>Cycle-accurate模拟器准确评估性能</li>
+<li>硬件性能计数器实时监控运行状态</li>
+<li>Roofline模型识别计算/存储瓶颈</li>
+<li>性能回归测试防止优化退化</li>
+</ul>
+<p><strong>数值验证核心</strong></p>
+<ul>
+<li>Bit-accurate模型精确匹配硬件行为</li>
+<li>误差累积分析评估量化影响</li>
+<li>Corner case测试确保数值鲁棒性</li>
+<li>2:4稀疏需要专门的验证策略</li>
+</ul>
+<p><strong>关键公式回顾</strong></p>
+<ol>
+<li>
+<p>脉动阵列执行时间：
+$$T_{actual} = \frac{MKN}{P^2} + T_{pipeline} + T_{overhead}$$</p>
+</li>
+<li>
+<p>算术强度：
+$$AI = \frac{2MKN}{(MK + KN + MN) \times sizeof(dtype)}$$</p>
+</li>
+<li>
+<p>nvfp4量化误差：
+$$\epsilon_{accumulated} \approx \sqrt{N} \times \frac{1}{4}$$</p>
+</li>
+<li>
+<p>PE利用率：
+$$\eta_{PE} = \frac{\text{Active PE cycles}}{P^2 \times \text{Total cycles}}$$</p>
+</li>
+</ol>
+<h2 id="_2">练习题</h2>
+<h3 id="_3">基础题</h3>
+<p><strong>练习8.1</strong> 脉动阵列时序计算
+一个$8 \times 8$脉动阵列执行$32 \times 64 \times 16$的矩阵乘法（$A_{32 \times 64} \times B_{64 \times 16}$），假设时钟频率1GHz。计算：
+a) 需要多少个分块(tiles)？
+b) 理论执行时间是多少？
+c) 首个输出出现在第几个周期？</p>
+<p><em>Hint: 考虑如何将大矩阵分解为$8 \times 8$的块，注意流水线延迟。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>a) 分块数量：</p>
+<ul>
+<li>M维度：$\lceil 32/8 \rceil = 4$块</li>
+<li>N维度：$\lceil 16/8 \rceil = 2$块  </li>
+<li>K维度：$\lceil 64/8 \rceil = 8$块</li>
+<li>总计：$4 \times 2 = 8$个输出块，每块需要8次K维累加</li>
+</ul>
+<p>b) 理论执行时间：</p>
+<ul>
+<li>单个块计算：$8 \times 8 \times 8 = 512$ cycles</li>
+<li>8个输出块串行：$8 \times 512 = 4096$ cycles</li>
+<li>加上流水线填充：$2 \times 8 - 1 = 15$ cycles</li>
+<li>总时间：$4096 + 15 = 4111$ cycles = 4.111μs</li>
+</ul>
+<p>c) 首个输出周期：</p>
+<ul>
+<li>权重加载：8 cycles</li>
+<li>流水线延迟：$2 \times 8 - 1 = 15$ cycles</li>
+<li>首个输出：第16个周期</li>
+</ul>
+</details>
+<p><strong>练习8.2</strong> 覆盖率计算
+某脉动阵列验证环境运行了1000个随机测试，覆盖了以下维度组合：</p>
+<ul>
+<li>M ∈ {1, 8, 16, 32, 64, 128}</li>
+<li>K ∈ {16, 32, 64, 128}</li>
+<li>N ∈ {8, 16, 32}</li>
+</ul>
+<p>如果要求所有(M, K, N)组合的交叉覆盖率达到100%，还需要多少测试？</p>
+<p><em>Hint: 计算总组合数，考虑均匀分布假设。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>总组合数：$6 \times 4 \times 3 = 72$种</p>
+<p>假设1000个随机测试均匀分布，每种组合期望出现：$1000/72 ≈ 13.9$次</p>
+<p>使用泊松分布，某组合未被覆盖的概率：$P(X=0) = e^{-13.9} ≈ 10^{-6}$</p>
+<p>期望未覆盖组合数：$72 \times 10^{-6} ≈ 0$</p>
+<p>因此1000个随机测试几乎肯定达到100%覆盖率，不需要额外测试。</p>
+<p>但如果分布不均匀，建议使用定向测试补充未覆盖的组合。</p>
+</details>
+<p><strong>练习8.3</strong> 性能瓶颈分析
+某NPU的脉动阵列规格：</p>
+<ul>
+<li>阵列大小：$32 \times 32$</li>
+<li>时钟频率：1.5 GHz</li>
+<li>存储带宽：256 GB/s</li>
+<li>数据类型：FP16 (2 bytes)</li>
+</ul>
+<p>计算执行$1024 \times 1024 \times 1024$ GEMM时是计算瓶颈还是存储瓶颈？</p>
+<p><em>Hint: 分别计算计算时间和数据传输时间。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>计算时间：</p>
+<ul>
+<li>FLOPs：$2 \times 1024^3 = 2^{31}$ FLOPs</li>
+<li>峰值算力：$32^2 \times 1.5 \times 10^9 \times 2 = 3.072$ TFLOPS</li>
+<li>计算时间：$2^{31} / (3.072 \times 10^{12}) = 0.698$ ms</li>
+</ul>
+<p>数据传输时间：</p>
+<ul>
+<li>数据量：$(1024^2 + 1024^2 + 1024^2) \times 2 = 6$ MB</li>
+<li>传输时间：$6 \times 10^6 / (256 \times 10^9) = 0.023$ ms</li>
+</ul>
+<p>算术强度：
+$$AI = \frac{2 \times 1024^3}{3 \times 1024^2 \times 2} = \frac{1024}{3} = 341.3 \text{ FLOPs/Byte}$$
+Roofline转折点：
+$$AI_{balance} = \frac{3072 \times 10^9}{256 \times 10^9} = 12 \text{ FLOPs/Byte}$$
+因为$AI = 341.3 &gt;&gt; AI_{balance} = 12$，所以是<strong>计算瓶颈</strong>。</p>
+</details>
+<h3 id="_4">挑战题</h3>
+<p><strong>练习8.4</strong> 误差累积估计
+使用nvfp4进行$256 \times 256$矩阵乘法，内部K维度为512。假设输入数据均匀分布在$[-1, 1]$。估计：
+a) 单个输出元素的最大绝对误差
+b) 99%置信区间的误差范围
+c) 如果要将误差控制在1%以内，K维度不能超过多少？</p>
+<p><em>Hint: 考虑512次累加的误差传播，使用统计模型。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>a) 最大绝对误差：</p>
+<ul>
+<li>单次乘法量化误差：$\epsilon_{mult} ≤ 0.25$</li>
+<li>单次加法量化误差：$\epsilon_{add} ≤ 0.25$</li>
+<li>512次累加最坏情况：$\epsilon_{max} = 512 \times (0.25 + 0.25) = 256$</li>
+<li>但实际输入在$[-1,1]$，最大绝对误差约：$512 \times 1 \times 0.25 = 128$</li>
+</ul>
+<p>b) 99%置信区间（使用正态近似）：</p>
+<ul>
+<li>单次误差标准差：$\sigma = \frac{0.25}{\sqrt{3}} = 0.144$</li>
+<li>512次累加：$\sigma_{total} = \sqrt{512} \times 0.144 = 3.26$</li>
+<li>99%置信区间：$[-2.58\sigma, 2.58\sigma] = [-8.4, 8.4]$</li>
+</ul>
+<p>c) 1%误差要求：</p>
+<ul>
+<li>输出期望值：$\approx K \times E[a] \times E[b] = K \times 0 = 0$（均匀分布）</li>
+<li>实际期望值（考虑分布）：$\approx K/3$</li>
+<li>要求：$\frac{\sqrt{K} \times 0.25}{K/3} &lt; 0.01$</li>
+<li>解得：$K &lt; \frac{(0.75)^2}{(0.01)^2} = 5625$</li>
+</ul>
+</details>
+<p><strong>练习8.5</strong> 稀疏验证策略设计
+设计一个验证2:4稀疏脉动阵列的测试计划，要求覆盖：</p>
+<ul>
+<li>所有可能的2:4稀疏模式（每4个元素选2个）</li>
+<li>稀疏-稠密、稀疏-稀疏矩阵乘法</li>
+<li>与稠密计算的等价性验证</li>
+</ul>
+<p>列出至少5个关键测试用例及其验证目标。</p>
+<p><em>Hint: 考虑稀疏模式的组合数学特性。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>关键测试用例：</p>
+<ol>
+<li>
+<p><strong>模式穷举测试</strong>
+   - 2:4模式共$C_4^2 = 6$种：[1100], [1010], [1001], [0110], [0101], [0011]
+   - 验证每种模式的索引编码正确性</p>
+</li>
+<li>
+<p><strong>对齐边界测试</strong>
+   - 矩阵维度是4的倍数：完美对齐
+   - 矩阵维度模4余1,2,3：需要padding处理
+   - 验证padding不影响结果正确性</p>
+</li>
+<li>
+<p><strong>稀疏度退化测试</strong>
+   - 全零块（0:4）：验证跳过机制
+   - 全密块（4:4）：退化为稠密计算
+   - 1:4稀疏：验证非标准稀疏度处理</p>
+</li>
+<li>
+<p><strong>数值等价性测试</strong>
+   - 相同输入的稀疏/稠密计算结果比较
+   - 误差应在量化精度范围内
+   - 使用特殊矩阵（单位阵、对角阵）验证</p>
+</li>
+<li>
+<p><strong>性能验证测试</strong>
+   - 理论加速比：2x（忽略索引开销）
+   - 实际加速比测量
+   - 不同稀疏度下的性能曲线</p>
+</li>
+</ol>
+</details>
+<p><strong>练习8.6</strong> 验证环境性能优化
+某验证环境运行一个完整的CNN模型需要10小时。分析显示：</p>
+<ul>
+<li>40%时间在参考模型计算</li>
+<li>30%时间在数据比对</li>
+<li>20%时间在测试生成</li>
+<li>10%时间在RTL仿真</li>
+</ul>
+<p>提出至少3种优化方案，估计每种方案的加速效果。</p>
+<p><em>Hint: 考虑并行化、增量验证、分层策略。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>优化方案：</p>
+<ol>
+<li>
+<p><strong>参考模型并行化（预期加速3-4x）</strong>
+   - 使用多线程/多进程并行计算不同层
+   - 预计将40%的时间减少到10-13%
+   - 总体加速：$\frac{1}{0.7 + 0.1} = 1.25$x</p>
+</li>
+<li>
+<p><strong>增量比对策略（预期加速2x）</strong>
+   - 只在关键点比对，不是每个周期都比对
+   - 使用签名(signature)快速比对
+   - 将30%时间减少到15%
+   - 总体加速：$\frac{1}{0.85} = 1.18$x</p>
+</li>
+<li>
+<p><strong>分层验证策略（预期加速5x）</strong>
+   - 先验证单层，再验证多层组合
+   - 使用已验证层的简化模型
+   - 减少完整模型运行次数
+   - 总体加速：视具体分解策略，可达5x</p>
+</li>
+<li>
+<p><strong>硬件加速器（预期加速10x）</strong>
+   - 使用FPGA原型加速RTL仿真
+   - 使用GPU加速参考模型
+   - 组合效果可达10x加速</p>
+</li>
+</ol>
+<p>综合使用多种优化，目标将10小时减少到1-2小时。</p>
+</details>
+<p><strong>练习8.7</strong> 覆盖率收敛分析
+某项目的覆盖率数据如下：</p>
+<ul>
+<li>100个测试：60%覆盖率</li>
+<li>500个测试：85%覆盖率  </li>
+<li>1000个测试：92%覆盖率</li>
+<li>2000个测试：95%覆盖率</li>
+</ul>
+<p>a) 拟合覆盖率增长曲线
+b) 预测达到99%覆盖率需要多少测试
+c) 分析是否存在难以覆盖的场景</p>
+<p><em>Hint: 使用对数或指数模型拟合。</em></p>
+<details>
+<summary>参考答案</summary>
+<p>a) 覆盖率增长模型（使用渐近模型）：
+$$C(n) = C_{max}(1 - e^{-\lambda n})$$
+根据数据点拟合：</p>
+<ul>
+<li>$C_{max} \approx 100\%$（理论上限）</li>
+<li>$\lambda \approx 0.0015$</li>
+</ul>
+<p>拟合曲线：$C(n) = 100(1 - e^{-0.0015n})\%$</p>
+<p>b) 达到99%覆盖率：
+$$99 = 100(1 - e^{-0.0015n})$$
+$$e^{-0.0015n} = 0.01$$
+$$n = \frac{-\ln(0.01)}{0.0015} \approx 3073$$</p>
+<p>预测需要约3000个测试。</p>
+<p>c) 难覆盖场景分析：</p>
+<ul>
+<li>覆盖率增长明显放缓（2000个测试仅达95%）</li>
+<li>最后5%需要的测试数量与前95%相当</li>
+<li>建议：</li>
+<li>分析未覆盖代码，使用定向测试</li>
+<li>考虑某些场景是否不可达(unreachable)</li>
+<li>评估99%目标的成本效益</li>
+</ul>
+</details>
+<h2 id="_5">常见陷阱与错误</h2>
+<h3 id="_6">验证完备性陷阱</h3>
+<p><strong>陷阱1：过度依赖代码覆盖率</strong></p>
+<ul>
+<li>问题：100%代码覆盖率≠功能正确</li>
+<li>案例：所有代码都执行了，但组合逻辑错误未发现</li>
+<li>解决：结合功能覆盖率和断言验证</li>
+</ul>
+<p><strong>陷阱2：忽视负面测试</strong></p>
+<ul>
+<li>问题：只测试正常路径，不测试异常情况</li>
+<li>案例：溢出处理、非法输入未验证</li>
+<li>解决：系统性设计错误注入测试</li>
+</ul>
+<h3 id="_7">性能验证陷阱</h3>
+<p><strong>陷阱3：理想化的性能模型</strong></p>
+<ul>
+<li>问题：忽略实际系统开销</li>
+<li>案例：未考虑cache miss、总线仲裁延迟</li>
+<li>解决：使用实际workload校准模型</li>
+</ul>
+<p><strong>陷阱4：单点性能测试</strong></p>
+<ul>
+<li>问题：只测试特定维度，错过性能悬崖</li>
+<li>案例：只测16的倍数，错过非对齐情况性能下降</li>
+<li>解决：全面扫描参数空间</li>
+</ul>
+<h3 id="_8">数值验证陷阱</h3>
+<p><strong>陷阱5：累积误差低估</strong></p>
+<ul>
+<li>问题：线性假设误差增长</li>
+<li>案例：长序列累加导致精度完全丧失</li>
+<li>解决：使用Kahan求和等数值稳定算法</li>
+</ul>
+<p><strong>陷阱6：特殊值处理遗漏</strong></p>
+<ul>
+<li>问题：未测试NaN、Inf传播</li>
+<li>案例：一个NaN污染整个计算结果</li>
+<li>解决：专门的特殊值测试集</li>
+</ul>
+<h3 id="_9">验证效率陷阱</h3>
+<p><strong>陷阱7：过早的随机测试</strong></p>
+<ul>
+<li>问题：基本功能未稳定就开始随机测试</li>
+<li>案例：90%的随机测试因基本错误而失败</li>
+<li>解决：先定向测试，后随机测试</li>
+</ul>
+<p><strong>陷阱8：验证环境过度复杂</strong></p>
+<ul>
+<li>问题：验证代码比RTL还复杂</li>
+<li>案例：验证环境本身有bug</li>
+<li>解决：保持验证代码简洁，充分测试验证环境</li>
+</ul>
+<h2 id="_10">最佳实践检查清单</h2>
+<h3 id="_11">验证计划制定</h3>
+<ul>
+<li>[ ] 明确验证目标和验收标准</li>
+<li>[ ] 定义覆盖率目标（功能/代码/断言）</li>
+<li>[ ] 制定测试用例优先级</li>
+<li>[ ] 规划验证资源和时间表</li>
+<li>[ ] 建立bug跟踪和管理流程</li>
+</ul>
+<h3 id="_12">验证环境建设</h3>
+<ul>
+<li>[ ] 搭建分层验证架构</li>
+<li>[ ] 实现自动化测试框架</li>
+<li>[ ] 建立回归测试系统</li>
+<li>[ ] 配置持续集成(CI)流程</li>
+<li>[ ] 准备调试和分析工具</li>
+</ul>
+<h3 id="_13">功能验证执行</h3>
+<ul>
+<li>[ ] 完成所有定向测试用例</li>
+<li>[ ] 达到代码覆盖率目标（&gt;95%）</li>
+<li>[ ] 达到功能覆盖率目标（100%）</li>
+<li>[ ] 完成压力测试和边界测试</li>
+<li>[ ] 通过所有断言检查</li>
+</ul>
+<h3 id="_14">性能验证执行</h3>
+<ul>
+<li>[ ] 建立性能基准(baseline)</li>
+<li>[ ] 完成性能扫描测试</li>
+<li>[ ] 验证实际workload性能</li>
+<li>[ ] 分析性能瓶颈</li>
+<li>[ ] 验证功耗和热设计</li>
+</ul>
+<h3 id="_15">数值验证执行</h3>
+<ul>
+<li>[ ] Bit-accurate验证通过</li>
+<li>[ ] 误差在可接受范围内</li>
+<li>[ ] 特殊值处理正确</li>
+<li>[ ] 量化/稀疏功能正确</li>
+<li>[ ] 与浮点参考误差可控</li>
+</ul>
+<h3 id="_16">验证收尾工作</h3>
+<ul>
+<li>[ ] 编写验证报告</li>
+<li>[ ] 归档测试用例和结果</li>
+<li>[ ] 总结经验教训</li>
+<li>[ ] 更新验证方法学</li>
+<li>[ ] 知识传递和培训</li>
+</ul>
+<h3 id="_17">验证质量保证</h3>
+<ul>
+<li>[ ] 验证代码review</li>
+<li>[ ] 交叉验证（不同团队/工具）</li>
+<li>[ ] 与其他项目对比</li>
+<li>[ ] 客户场景验证</li>
+<li>[ ] 长时间稳定性测试</li>
+</ul>
+            </article>
+            
+            <nav class="page-nav"><a href="chapter7.html" class="nav-link prev">← 第7章：TPU编译器与映射</a><a href="chapter9.html" class="nav-link next">第9章：数据流架构原理 →</a></nav>
+        </main>
+    </div>
+</body>
+</html>
