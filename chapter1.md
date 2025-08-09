@@ -136,6 +136,14 @@ CPU采用复杂的控制流处理来应对程序的不可预测性：
 
 现代CPU的分支预测器是工程杰作。以Intel的分支预测器为例，它结合了多种预测机制：局部历史预测（基于单个分支的历史）、全局历史预测（基于程序的全局分支历史）、循环预测器（检测循环模式）。这些预测器的结果通过元预测器（meta-predictor）进行选择或组合。
 
+分支预测的准确性对CPU性能至关重要。考虑一个简单的条件判断：
+```
+if (data[i] > threshold) {
+    result += compute_expensive(data[i]);
+}
+```
+如果分支预测准确，CPU可以提前开始执行`compute_expensive`函数，将其延迟完全隐藏。但如果预测错误，所有推测执行的结果都必须丢弃，造成几十个周期的性能损失。现代分支预测器使用感知器（perceptron）或神经网络方法，维护数千个历史模式，占用芯片面积相当于一个小型缓存。
+
 乱序执行引擎是CPU性能的关键。指令在解码后进入重排序缓冲区（ROB），可以不按程序顺序执行，只要满足数据依赖关系。现代CPU的ROB可以容纳200-300条指令，配合几十个物理寄存器进行寄存器重命名，消除伪依赖。执行完成的指令按原始顺序提交，保证程序语义正确。
 
 推测执行允许CPU在分支结果未知时继续执行。如果预测正确，性能得到提升；如果预测错误，需要清空错误路径上的所有操作，恢复到分支点的状态。这种回滚机制需要复杂的硬件支持，包括检查点（checkpoint）机制和精确异常处理。
@@ -180,6 +188,48 @@ NPU通常采用VLIW（Very Long Instruction Word）风格的指令集。一条�
 
 数据流架构的NPU更进一步，完全消除了集中式控制。每个处理单元根据数据到达情况自主执行，通过握手信号协调。这种设计特别适合流式处理，数据像流水一样通过处理管道。
 
+Groq的TSP（Tensor Streaming Processor）是数据流架构的典型代表。它没有传统的指令缓存和控制逻辑，而是在编译时就确定了每个时钟周期每个处理单元的操作。这种"软件定义硬件"的方法将控制复杂度转移到编译器，硬件变得极其简单高效。每个处理单元只需要知道：何时接收数据、执行什么操作、何时发送结果。这种确定性使得TSP可以保证精确到周期的执行时间，这对实时系统极其重要。
+
+**数据流模式对比：**
+
+三种架构采用了不同的数据流策略，直接影响了它们的性能特征：
+
+**CPU的灵活数据流**
+
+CPU支持任意的数据访问模式，这是通用性的体现：
+- 随机访问：通过多级缓存和预取器优化
+- 流式访问：硬件预取器识别顺序模式
+- 间接访问：支持指针追踪，但性能较差
+
+CPU的加载/存储单元（LSU）是复杂的微架构，需要处理各种边界情况：未对齐访问、跨页访问、内存序列化等。存储缓冲区（store buffer）和加载队列允许内存操作的乱序执行，但需要维护内存一致性。现代CPU的LSU可以同时处理数十个正在进行的内存操作，通过内存级并行（MLP）隐藏访问延迟。
+
+**GPU的规则数据流**
+
+GPU优化了规则的并行访问模式：
+- 合并访问（Coalesced Access）：相邻线程访问连续地址
+- 纹理缓存：优化2D/3D空间局部性
+- 常量缓存：广播只读数据到所有线程
+
+GPU的内存控制器设计围绕带宽优化。当一个warp的32个线程访问连续的128字节时，这些访问可以合并成一次内存事务。但如果访问是分散的，可能需要32次独立事务，带宽利用率下降32倍。这解释了为什么GPU程序优化经常聚焦于改善内存访问模式。
+
+NVIDIA的纹理缓存是GPU早期为图形设计的遗产，但在深度学习中也很有用。它针对2D空间局部性优化，使用Z-order（Morton order）等空间填充曲线改善缓存命中率。对于卷积操作，纹理缓存可以显著提升性能。
+
+**NPU的确定性数据流**
+
+NPU采用高度优化的固定数据流模式：
+- 权重静止（Weight Stationary）：权重保持在PE本地
+- 输出静止（Output Stationary）：部分和在PE累积
+- 行静止（Row Stationary）：优化所有数据的重用
+
+TPU采用权重静止数据流，这种选择基于推理时权重的只读特性。权重在推理开始时加载到脉动阵列，然后多个批次的激活值流过阵列。这最大化了权重重用，减少了昂贵的外部内存访问。每个PE只需要简单的寄存器存储一个权重值，以及一个累加器存储部分和。
+
+数据流的选择对能效影响巨大。研究表明，对于相同的计算任务：
+- 权重静止：适合大批量推理，能效最高
+- 输出静止：适合小批量，减少部分和的移动
+- 行静止：平衡各种数据的重用，最灵活
+
+MIT的Eyeriss架构采用行静止数据流，通过精心设计的数据映射，同时优化权重、输入激活和部分和的重用。这种设计在各种CNN层都能保持高效率，而不需要为不同层类型切换数据流模式。
+
 ### 1.1.4 能效比较与设计权衡
 
 能效（Performance per Watt）是评估处理器架构的关键指标：
@@ -190,10 +240,84 @@ NPU通常采用VLIW（Very Long Instruction Word）风格的指令集。一条�
 | GPU | 200-400W | 20-40 TFLOPS | 0.1 TFLOPS/W | 并行计算、训练 |
 | NPU | 50-100W | 100-400 TOPS | 2-4 TOPS/W | AI推理、边缘计算 |
 
+**能效差异的根本原因分析：**
+
+NPU相比GPU和CPU在能效上的巨大优势来自多个方面的优化：
+
+1. **控制开销削减**
+   - CPU：控制逻辑占芯片面积30-40%，功耗占比类似
+   - GPU：控制逻辑占15-20%，warp调度器和指令缓存
+   - NPU：控制逻辑仅占5-10%，简单状态机即可
+
+2. **数据移动优化**
+   数据移动的能耗远高于计算本身。在45nm工艺下的典型能耗数据：
+   - 32位整数加法：0.1 pJ
+   - 32位整数乘法：3.1 pJ
+   - 32位寄存器读取：1 pJ
+   - 32位SRAM读取：5 pJ
+   - 32位DRAM读取：640 pJ
+   
+   NPU通过固定的数据流模式，最小化数据移动距离。例如，脉动阵列中数据只在相邻PE间移动，避免了长距离的片上互连。
+
+3. **精度优化收益**
+   - FP32 MAC：~4 pJ (7nm工艺)
+   - FP16 MAC：~1 pJ（4×节能）
+   - INT8 MAC：~0.2 pJ（20×节能）
+   - INT4 MAC：~0.05 pJ（80×节能）
+   
+   NPU专门为低精度运算优化，而CPU/GPU需要支持高精度以满足通用计算需求。
+
+**实际案例对比：**
+
+以BERT-Base模型推理为例（序列长度512）：
+- Intel Xeon 8280（CPU）：~5 queries/s @ 200W = 0.025 qps/W
+- NVIDIA V100（GPU）：~100 queries/s @ 300W = 0.33 qps/W
+- Google TPU v3（NPU）：~1000 queries/s @ 200W = 5 qps/W
+
+NPU达到了200倍于CPU、15倍于GPU的能效。这种差距在边缘部署场景更加明显，因为散热和电池限制更加严格。
+
 设计权衡分析：
+
 1. **灵活性 vs 效率**：CPU最灵活但效率最低，NPU效率最高但只能执行特定workload
+   
+   这种权衡可以用Pollack's Rule的变体来理解：性能提升的平方根正比于晶体管数量的增加。但专用化可以打破这个规律，用相同的晶体管获得10-100倍的性能提升。代价是失去通用性——NPU无法运行操作系统，无法执行分支密集的控制代码。
+
 2. **开发复杂度**：CPU编程模型成熟，GPU需要并行思维，NPU依赖专用编译器
+   
+   CPU有50年的软件生态积累，任何程序员都能编写CPU代码。GPU编程需要理解并行计算模型，使用CUDA或OpenCL等专门框架。NPU编程最具挑战性，通常需要：
+   - 图优化编译器（如XLA、TVM）
+   - 自动映射和调度算法
+   - 硬件感知的优化pass
+   - 性能调试工具链
+
 3. **部署场景**：数据中心可接受高功耗GPU，边缘设备需要高能效NPU
+   
+   不同部署场景的约束：
+   - 数据中心：功耗预算300-400W，注重总吞吐量
+   - 边缘服务器：功耗预算50-150W，平衡延迟和吞吐量
+   - 移动设备：功耗预算2-5W，电池寿命优先
+   - IoT设备：功耗预算<1W，极致能效要求
+
+**架构演进趋势：**
+
+三种架构正在相互借鉴，边界逐渐模糊：
+
+1. **CPU增加AI加速**：
+   - Intel AMX：矩阵运算扩展
+   - ARM SVE：可扩展向量扩展
+   - Apple Neural Engine：集成NPU
+
+2. **GPU增强推理能力**：
+   - Tensor Core：矩阵运算单元
+   - 结构化稀疏支持
+   - INT8/INT4推理优化
+
+3. **NPU提升灵活性**：
+   - 可编程向量单元
+   - 多精度支持
+   - 动态计算图支持
+
+未来的趋势是异构集成：在同一芯片上集成CPU、GPU、NPU核心，通过统一内存和高速互连协同工作。Apple M1/M2、NVIDIA Grace Hopper都是这种趋势的体现。软件栈需要智能地将不同类型的计算分配到最合适的处理器上，实现系统级的最优能效。
 
 ## 1.2 推理加速的关键指标：延迟、吞吐量、能效
 
@@ -221,22 +345,81 @@ $$\text{Performance} = \min\left(\text{Peak Performance}, \text{Arithmetic Inten
 其中算术强度（Arithmetic Intensity）定义为：
 $$AI = \frac{\text{FLOPs}}{\text{Bytes Accessed}}$$
 
+**Roofline模型的深入理解：**
+
+Roofline模型将性能空间分为两个区域：
+- **内存带宽受限区域**：当 $AI < \frac{\text{Peak Performance}}{\text{Memory Bandwidth}}$ 时
+- **计算受限区域**：当 $AI \geq \frac{\text{Peak Performance}}{\text{Memory Bandwidth}}$ 时
+
+转折点称为"ridge point"，对于200 TOPS的NPU配256 GB/s带宽，ridge point在 $AI = \frac{200 \text{ TOPS}}{256 \text{ GB/s}} = 781$ OPs/byte。这意味着只有算术强度超过781的操作才能充分利用计算能力。
+
+**层级Roofline模型：**
+
+实际系统有多级存储，可以构建层级Roofline：
+```
+L1 Cache Roofline: 10 TB/s → Ridge at AI = 20 OPs/byte
+L2 Cache Roofline: 2 TB/s → Ridge at AI = 100 OPs/byte  
+HBM Roofline: 256 GB/s → Ridge at AI = 781 OPs/byte
+```
+
+优化目标是让数据尽可能从高带宽的存储层次获取，通过tiling和数据重用提升有效算术强度。
+
 对于不同的神经网络层，算术强度差异很大：
 
 1. **全连接层（FC）**：
    - 计算量：$2MNK$ FLOPs（矩阵乘法）
    - 数据量：$(MK + KN + MN) \times \text{sizeof(dtype)}$ bytes
    - AI ≈ $\frac{2MNK}{(MK + KN + MN) \times \text{sizeof(dtype)}}$
+   
+   示例：M=1024, N=1024, K=1024, FP16
+   - 计算：2,147,483,648 FLOPs
+   - 内存：6,291,456 bytes
+   - AI = 341 FLOPs/byte（计算受限，如果数据从L2获取）
 
 2. **卷积层（Conv2D）**：
    - 计算量：$2 \times C_{out} \times C_{in} \times K_h \times K_w \times H_{out} \times W_{out}$ FLOPs
    - 数据量取决于数据重用策略
    - AI 通常在 10-100 FLOPs/byte
+   
+   卷积的算术强度高度依赖于维度。深度可分离卷积（Depthwise Separable Convolution）将标准卷积分解为depthwise和pointwise两步，大幅减少计算量但也降低了算术强度：
+   - 标准卷积：AI ≈ $\frac{K_h \times K_w \times C_{in}}{1 + \frac{1}{H_{out} \times W_{out}}}$
+   - Depthwise：AI ≈ $\frac{K_h \times K_w}{2}$（通常<5，严重内存受限）
+   - Pointwise：AI ≈ $\frac{C_{in}}{2}$（中等AI）
 
 3. **注意力层（Attention）**：
    - 计算量：$4N^2D + 2N^2$ FLOPs（$N$是序列长度，$D$是维度）
    - 内存访问：$O(N^2)$ 的attention矩阵
    - AI 随序列长度增加而降低
+   
+   自注意力机制的内存瓶颈：
+   $$\text{Memory}_{attention} = N^2 \times \text{sizeof(dtype)} \times \text{num\_heads}$$
+   
+   对于N=2048, 8个头, FP16：
+   - Attention矩阵：64 MB
+   - 如果这超过片上缓存，性能急剧下降
+   - Flash Attention通过分块计算缓解此问题
+
+**优化策略与算术强度提升：**
+
+1. **循环tiling（Loop Tiling）**：
+   将大矩阵乘法分解为小块，每块fits in cache：
+   ```
+   for ii in range(0, M, Tm):
+     for jj in range(0, N, Tn):
+       for kk in range(0, K, Tk):
+         C[ii:ii+Tm, jj:jj+Tn] += A[ii:ii+Tm, kk:kk+Tk] @ B[kk:kk+Tk, jj:jj+Tn]
+   ```
+   选择合适的Tm, Tn, Tk可以将有效AI提升10-100倍。
+
+2. **算子融合（Operator Fusion）**：
+   - Conv-BN-ReLU融合：避免3次内存往返，AI提升3×
+   - Attention中的softmax融合：避免存储中间的大矩阵
+   - 多个GEMM融合：共享输入数据的读取
+
+3. **数据布局优化**：
+   - NCHW vs NHWC：不同布局影响内存访问模式
+   - Z-order layout：提升2D空间局部性
+   - Blocked layout：匹配矩阵乘法的tiling
 
 ### 1.2.3 批处理大小与延迟权衡
 
