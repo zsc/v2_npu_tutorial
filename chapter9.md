@@ -8,51 +8,203 @@
 
 ## 9.1 数据流计算模型
 
-数据流计算模型起源于20世纪70年代，其核心思想是将计算表示为有向图，数据在图中的节点间流动并触发计算。与传统的冯·诺依曼架构依赖程序计数器顺序执行不同，数据流架构中的操作仅在其输入数据就绪时执行，天然支持细粒度并行。
+数据流计算模型起源于20世纪70年代，其核心思想是将计算表示为有向图，数据在图中的节点间流动并触发计算。与传统的冯·诺依曼架构依赖程序计数器顺序执行不同，数据流架构中的操作仅在其输入数据就绪时执行，天然支持细粒度并行。这一范式的理论基础可以追溯到Petri网和Kahn过程网络，它们为并发计算提供了严格的数学模型。
 
-这种计算范式的革命性在于它从根本上改变了程序执行的控制方式。在冯·诺依曼架构中，指令的执行顺序由程序计数器严格控制，即使两条指令之间没有数据依赖关系，它们也必须按照程序顺序执行。而在数据流架构中，指令的执行完全由数据的可用性驱动，只要输入数据准备就绪，对应的操作就可以立即执行，无需等待其他无关操作完成。这种执行模式特别适合现代AI工作负载，因为神经网络本质上就是一个数据流图，其中每一层的计算只依赖于前一层的输出。
+这种计算范式的革命性在于它从根本上改变了程序执行的控制方式。在冯·诺依曼架构中，指令的执行顺序由程序计数器严格控制，即使两条指令之间没有数据依赖关系，它们也必须按照程序顺序执行。这种顺序执行模型可以用状态转移函数表示：
 
-数据流计算模型的另一个重要优势是其固有的确定性。由于执行顺序完全由数据依赖关系决定，相同的输入总是产生相同的执行序列和输出结果。这种确定性对于安全关键应用（如自动驾驶）至关重要，因为它简化了系统验证和认证过程。此外，确定性执行还带来了功耗优化的机会，因为编译器可以精确预测每个单元的活动时间，从而实现激进的时钟门控和功耗管理策略。
+$$S_{t+1} = f(S_t, I_t)$$
+
+其中$S_t$是时刻$t$的机器状态，$I_t$是当前指令。而在数据流架构中，执行模型可以表示为：
+
+$$O_i = g_i(I_{i,1}, I_{i,2}, ..., I_{i,k})$$
+
+其中操作$i$的输出$O_i$仅依赖于其输入集合$\{I_{i,j}\}$，与全局状态无关。这种无状态计算模型消除了指令间的人为顺序约束，使得所有数据独立的操作可以并发执行。
+
+指令级并行度(ILP)的理论上界由数据依赖图的宽度决定。设图$G=(V,E)$的反链(antichain)集合为$\mathcal{A}$，则最大并行度：
+
+$$ILP_{max} = \max_{A \in \mathcal{A}} |A|$$
+
+其中反链是指图中两两之间不存在路径的节点集合。这个理论上界在数据流架构中可以充分利用，而在传统架构中由于控制流约束通常只能达到其一小部分。
+
+数据流计算模型的另一个重要优势是其固有的确定性。由于执行顺序完全由数据依赖关系决定，相同的输入总是产生相同的执行序列和输出结果。这种确定性可以形式化为幂等性质：
+
+$$\forall x \in X: f^n(x) = f(x), n \geq 1$$
+
+这种确定性对于安全关键应用（如自动驾驶）至关重要，因为它简化了系统验证和认证过程。形式化验证的状态空间从指数级$O(2^{|S|})$降低到多项式级$O(|V| \cdot |E|)$，其中$|S|$是状态空间大小，$|V|$和$|E|$分别是节点和边的数量。此外，确定性执行还带来了功耗优化的机会，因为编译器可以精确预测每个单元的活动时间，从而实现激进的时钟门控和功耗管理策略。
 
 ### 9.1.1 数据流图基础
 
-数据流图(Dataflow Graph, DFG)是数据流架构的核心抽象，由节点(nodes)和边(edges)组成。这种图表示方法不仅直观地展示了计算的结构，更重要的是它精确地定义了执行语义，使得硬件实现和编译器优化都有明确的目标。
+数据流图(Dataflow Graph, DFG)是数据流架构的核心抽象，由节点(nodes)和边(edges)组成。形式化定义为有向图$G = (V, E, \phi, \psi)$，其中：
+- $V$是节点集合，表示计算操作
+- $E \subseteq V \times V$是有向边集合，表示数据依赖
+- $\phi: V \rightarrow \mathcal{F}$将节点映射到函数空间
+- $\psi: E \rightarrow \mathcal{T}$将边映射到数据类型
+
+这种图表示方法不仅直观地展示了计算的结构，更重要的是它精确地定义了执行语义，使得硬件实现和编译器优化都有明确的目标。
 
 **节点定义与分类**
 
-节点是数据流图的基本计算单元，每个节点封装了一个特定的操作。根据功能和复杂度，节点可以分为多个层次。最基础的是算术逻辑节点，执行加减乘除等基本运算；其次是向量和矩阵节点，处理SIMD和张量操作；再上层是复合节点，如卷积、注意力机制等深度学习算子；最高层是控制节点，管理条件执行和循环迭代。
+节点是数据流图的基本计算单元，每个节点$v \in V$封装了一个特定的操作。节点的形式化定义为元组：
+
+$$v = (id, op, I, O, \tau, \sigma)$$
+
+其中：
+- $id$：节点唯一标识符
+- $op \in \mathcal{F}$：节点执行的操作函数
+- $I = \{i_1, i_2, ..., i_m\}$：输入端口集合
+- $O = \{o_1, o_2, ..., o_n\}$：输出端口集合
+- $\tau: I \cup O \rightarrow \mathcal{T}$：端口类型映射
+- $\sigma$：节点状态（对于有状态节点）
+
+根据功能和复杂度，节点可以分为多个层次：
+
+1. **原子节点(Atomic Nodes)**：执行不可分割的基本操作
+   - 算术节点：$f_{arith}: \mathbb{R}^n \rightarrow \mathbb{R}$
+   - 逻辑节点：$f_{logic}: \mathbb{B}^n \rightarrow \mathbb{B}$
+   - 存储节点：$f_{mem}: Addr \times Data \rightarrow Data$
+
+2. **复合节点(Composite Nodes)**：由多个原子操作组成
+   - SIMD节点：$f_{simd}: \mathbb{R}^{n \times k} \rightarrow \mathbb{R}^{m \times k}$
+   - 张量节点：$f_{tensor}: \mathbb{R}^{d_1 \times ... \times d_n} \rightarrow \mathbb{R}^{e_1 \times ... \times e_m}$
+
+3. **算子节点(Operator Nodes)**：深度学习专用操作
+   - 卷积节点：$f_{conv}: \mathbb{R}^{B \times C \times H \times W} \times \mathbb{R}^{K \times C \times R \times S} \rightarrow \mathbb{R}^{B \times K \times H' \times W'}$
+   - 注意力节点：$f_{attn}: \mathbb{R}^{B \times N \times D} \rightarrow \mathbb{R}^{B \times N \times D}$
+
+4. **控制节点(Control Nodes)**：管理执行流
+   - 条件节点：$f_{cond}: \mathbb{B} \times T \times T \rightarrow T$
+   - 循环节点：$f_{loop}: (S \rightarrow S \times \mathbb{B}) \times S \rightarrow S$
 
 每个节点的内部结构包含四个关键组件：
-- 输入端口：接收操作数，每个端口有明确的数据类型和位宽约束
-- 输出端口：产生结果，支持多播以供多个下游节点使用
-- 触发条件：定义何时执行，决定了节点的激活逻辑
-- 计算函数：定义操作语义，可以是组合逻辑或时序逻辑
 
-节点的粒度选择是设计中的关键权衡。细粒度节点（如单个乘法器）提供最大的灵活性和并行机会，但会增加图的复杂度和调度开销。粗粒度节点（如整个卷积层）简化了图结构和编译，但可能限制优化空间。现代数据流架构通常采用层次化的节点设计，在不同抽象层次提供不同粒度的操作。
+1. **输入端口(Input Ports)**：接收操作数，每个端口$i_j$定义为：
+   $$i_j = (type_j, width_j, rate_j, policy_j)$$
+   - $type_j \in \{scalar, vector, tensor\}$：数据结构类型
+   - $width_j \in \{8, 16, 32, 64\}$：位宽
+   - $rate_j \in \mathbb{Q}^+$：消费速率（令牌/周期）
+   - $policy_j \in \{blocking, non\text{-}blocking\}$：阻塞策略
+
+2. **输出端口(Output Ports)**：产生结果，支持多播
+   $$o_k = (type_k, width_k, rate_k, fanout_k)$$
+   - $fanout_k \in \mathbb{N}$：扇出度，表示连接的下游节点数
+
+3. **触发条件(Firing Rule)**：定义激活逻辑
+   $$fire(v) = \begin{cases}
+   true & \text{if } \forall i_j \in I: available(i_j) \geq required(i_j) \\
+   false & \text{otherwise}
+   \end{cases}$$
+
+4. **计算函数(Compute Function)**：定义操作语义
+   $$f_v: \prod_{j=1}^{|I|} \mathcal{T}(i_j) \rightarrow \prod_{k=1}^{|O|} \mathcal{T}(o_k)$$
+   
+   延迟模型：$d(v) = d_{fixed} + d_{variable}(|data|)$
+
+节点的粒度选择是设计中的关键权衡，可以通过成本模型量化：
+
+$$Cost(g) = \alpha \cdot Complexity(g) + \beta \cdot Overhead(g) - \gamma \cdot Parallelism(g)$$
+
+其中：
+- $Complexity(g) = |V_g| + |E_g|$：图复杂度
+- $Overhead(g) = \sum_{e \in E_g} latency(e) + \sum_{v \in V_g} schedule\_cost(v)$：调度开销
+- $Parallelism(g) = \frac{\sum_{v \in V_g} work(v)}{critical\_path(g)}$：可获得的并行度
+
+细粒度节点（如单个乘法器）：
+- 优势：$Parallelism_{fine} = O(n^2)$对于$n \times n$矩阵乘法
+- 劣势：$Overhead_{fine} = O(n^3)$的调度复杂度
+
+粗粒度节点（如整个卷积层）：
+- 优势：$Overhead_{coarse} = O(1)$的调度复杂度
+- 劣势：$Parallelism_{coarse} = O(1)$受限于节点内部并行
+
+现代数据流架构通常采用层次化的节点设计，通过多级粒度优化总成本：
+
+$$g_{optimal} = \arg\min_g Cost(g) \text{ s.t. } Resources(g) \leq R_{available}$$
 
 **边的属性与语义**
 
-边不仅仅是简单的连线，它承载了丰富的语义信息。每条边都定义了一个生产者-消费者关系，规定了数据的流向和时序约束。边的核心属性包括：
+边不仅仅是简单的连线，它承载了丰富的语义信息。每条边$e = (u, v) \in E$定义了一个生产者-消费者关系，其形式化定义为：
 
-数据类型定义了边上传输的信息格式，从简单的标量到复杂的张量结构。类型系统的设计直接影响硬件的复杂度和灵活性。静态类型系统在编译时确定所有类型，简化硬件但限制动态行为；动态类型系统支持运行时类型变化，增加灵活性但需要额外的元数据传输。
+$$e = (src, dst, type, capacity, latency, policy)$$
 
-缓冲深度决定了边上可以暂存的数据量，这直接影响系统的吞吐量和面积开销。深度为零的边要求严格的生产者-消费者同步，类似于组合逻辑；有限深度的边提供了弹性，可以吸收执行时间的变化；无限深度的边（理论上）完全解耦生产者和消费者，但实际实现总有上限。
+其中：
+- $src, dst \in V$：源节点和目标节点
+- $type \in \mathcal{T}$：传输的数据类型
+- $capacity \in \mathbb{N} \cup \{\infty\}$：缓冲容量
+- $latency \in \mathbb{R}^+$：传输延迟
+- $policy \in \{FIFO, LIFO, priority\}$：调度策略
 
-传输延迟不仅包括物理传输时间，还包括同步、仲裁和路由的开销。在大规模数据流系统中，传输延迟可能成为性能瓶颈，特别是当数据需要跨越多个时钟域或长距离传输时。
+**类型系统设计**
+
+数据类型系统的复杂度影响硬件开销和编译效率。静态类型系统的类型检查复杂度为$O(|E|)$，而动态类型系统需要运行时开销：
+
+$$Overhead_{dynamic} = \sum_{e \in E} (metadata\_size(e) \times frequency(e))$$
+
+类型推断可以通过Hindley-Milner算法实现，复杂度为$O(n \cdot \alpha(n))$，其中$\alpha$是逆Ackermann函数。
+
+**缓冲深度优化**
+
+缓冲深度$B_e$的选择需要平衡性能和面积：
+
+$$B_{optimal} = \arg\min_B [Area(B) + \lambda \cdot Latency(B)]$$
+
+其中延迟模型：
+$$Latency(B) = \begin{cases}
+0 & \text{if } B \geq \Delta_{rate} \times T_{burst} \\
+\frac{\Delta_{rate} \times T_{burst} - B}{throughput} & \text{otherwise}
+\end{cases}$$
+
+$\Delta_{rate} = |production\_rate - consumption\_rate|$是速率差异。
+
+**传输延迟分析**
+
+端到端延迟包含多个组成部分：
+$$L_{e2e} = L_{prop} + L_{trans} + L_{queue} + L_{proc}$$
+
+其中：
+- $L_{prop} = \frac{distance}{c_{signal}}$：物理传播延迟
+- $L_{trans} = \frac{data\_size}{bandwidth}$：传输延迟  
+- $L_{queue} = \frac{\lambda}{\mu(\mu - \lambda)}$：排队延迟（M/M/1模型）
+- $L_{proc}$：处理延迟
+
+在片上网络中，Manhattan距离$d = |x_1 - x_2| + |y_1 - y_2|$决定了跳数，每跳延迟约1-2个周期。
 
 **触发规则的设计空间**
 
-触发规则定义了节点何时可以执行，这是数据流语义的核心。不同的触发规则导致不同的执行行为和硬件复杂度：
+触发规则定义了节点何时可以执行，这是数据流语义的核心。触发条件可以形式化为谓词函数：
 
-1. **严格触发（Strict Firing）**：要求所有输入端口都有有效数据才能执行。这是最简单和最常见的规则，保证了执行的确定性，但可能因为等待慢速输入而降低吞吐量。
+$$\mathcal{F}: V \times \mathcal{S} \rightarrow \{true, false\}$$
 
-2. **松散触发（Lenient Firing）**：允许部分输入就绪即可开始执行，适用于有默认值或可选输入的操作。这增加了并行机会但需要更复杂的控制逻辑。
+其中$\mathcal{S}$是系统状态空间。不同的触发规则导致不同的执行行为：
 
-3. **条件触发（Conditional Firing）**：基于数据值或外部信号决定是否执行。这支持了动态行为如早期退出和条件分支，但破坏了静态可预测性。
+1. **严格触发（Strict Firing）**：
+   $$\mathcal{F}_{strict}(v, s) = \bigwedge_{i \in inputs(v)} available(i, s)$$
+   
+   硬件复杂度：$O(|inputs|)$的AND门
+   吞吐量损失：$T_{loss} = \max_i T_i - \bar{T}$，其中$T_i$是输入$i$的到达时间
 
-4. **周期触发（Periodic Firing）**：按固定时间间隔执行，不管输入状态。这适用于采样、定时器等周期性操作，需要额外的时钟同步机制。
+2. **松散触发（Lenient Firing）**：
+   $$\mathcal{F}_{lenient}(v, s) = \bigvee_{S \subseteq inputs(v), |S| \geq k} \bigwedge_{i \in S} available(i, s)$$
+   
+   其中$k$是最小输入数。硬件复杂度：$O(\binom{|inputs|}{k})$
 
-考虑一个简单的表达式 $z = (a + b) \times c$，其数据流图表示为：
+3. **条件触发（Conditional Firing）**：
+   $$\mathcal{F}_{cond}(v, s) = predicate(data\_values(inputs(v))) \land \mathcal{F}_{strict}(v, s)$$
+   
+   分支预测准确率影响：$IPC_{effective} = IPC_{ideal} \times (1 - penalty \times miss\_rate)$
+
+4. **周期触发（Periodic Firing）**：
+   $$\mathcal{F}_{periodic}(v, s) = (clock(s) \mod period(v) = 0)$$
+   
+   功耗影响：$P_{periodic} = f_{trigger} \times E_{op}$，即使输入未就绪也消耗能量
+
+**触发规则的选择准则**
+
+选择最优触发规则需要考虑：
+- 硬件开销：$Area \propto complexity(\mathcal{F})$
+- 性能影响：$Throughput \propto P(\mathcal{F} = true)$
+- 功耗效率：$Energy/op = \frac{E_{total}}{ops_{useful}}$
+
+考虑一个简单的表达式 $z = (a + b) \times c$，其数据流图表示和执行分析：
 
 ```
      a ──┐
@@ -61,31 +213,130 @@
                     c ─────┘
 ```
 
-这个看似简单的图实际上蕴含了丰富的执行语义。加法节点在接收到a和b后立即开始计算，无需等待c的到达。乘法节点则必须等待加法的结果和c都准备好才能执行。这种异步执行模式最大化了硬件利用率，因为不同的功能单元可以独立工作，不受全局控制的约束。
+**执行时序分析**
+
+假设输入到达时间：$t_a = 0, t_b = 1, t_c = 0$，操作延迟：$d_{add} = 2, d_{mul} = 3$
+
+执行调度：
+- $t_{add\_start} = \max(t_a, t_b) = 1$
+- $t_{temp} = t_{add\_start} + d_{add} = 3$
+- $t_{mul\_start} = \max(t_{temp}, t_c) = 3$
+- $t_z = t_{mul\_start} + d_{mul} = 6$
+
+关键路径：$CP = \{b \rightarrow add \rightarrow mul \rightarrow z\}$，长度为$1 + 2 + 3 = 6$
+
+**资源利用率分析**
+
+设系统有1个加法器和1个乘法器：
+- 加法器利用率：$\eta_{add} = \frac{2}{6} = 33.3\%$
+- 乘法器利用率：$\eta_{mul} = \frac{3}{6} = 50\%$
+- 平均利用率：$\bar{\eta} = \frac{2 + 3}{2 \times 6} = 41.7\%$
+
+这种异步执行模式的优势在于：
+1. 无需全局同步，减少了控制开销
+2. 自然的流水线并行，不同数据批次可重叠执行
+3. 局部性优化，temp值可直接转发无需存储
 
 **数据依赖与并行性分析**
 
-数据流图的一个关键优势是它明确地暴露了所有的数据依赖关系，使得并行性分析变得直观和精确。通过分析图的拓扑结构，我们可以识别出多种层次的并行机会。
+数据流图的一个关键优势是它明确地暴露了所有的数据依赖关系。依赖关系可以通过可达性矩阵$R$表示：
 
-任务级并行性出现在图中不相连的子图之间。例如，在处理批量数据时，每个样本的处理可以形成独立的子图，这些子图之间没有数据依赖，可以完全并行执行。在自动驾驶系统中，不同传感器（相机、激光雷达、毫米波雷达）的数据处理管道通常形成独立的子图，可以并发处理以降低端到端延迟。
+$$R_{ij} = \begin{cases}
+1 & \text{if } \exists \text{ path from } v_i \text{ to } v_j \\
+0 & \text{otherwise}
+\end{cases}$$
 
-数据级并行性体现在对向量或张量数据的操作上。一个矩阵乘法节点内部可以将计算分解为多个独立的点积操作，这些操作可以在多个处理单元上并行执行。这种并行性的粒度可以根据硬件资源动态调整，从而在不同的功耗和性能点之间权衡。
+传递闭包可通过Floyd-Warshall算法计算，复杂度$O(|V|^3)$。
 
-流水线并行性利用了数据流的流式特性。当处理连续的数据流时，不同的节点可以同时处理不同批次的数据。例如，当第一批数据在进行卷积操作时，第二批数据可以同时进行预处理，第三批数据可以从存储器加载。这种重叠执行显著提高了系统的吞吐量。
+**并行性层次分析**
 
-并行度的定量分析对于评估架构效率至关重要。设图 $G = (V, E)$，其中节点 $v \in V$ 的计算延迟为 $d(v)$，则关键路径长度：
+1. **任务级并行(Task-Level Parallelism, TLP)**
+   
+   独立子图识别算法：
+   $$Components = ConnectedComponents(G)$$
+   $$TLP = |Components|$$
+   
+   在自动驾驶系统中的量化：
+   - 相机管道：100 GFLOPS
+   - LiDAR管道：50 GFLOPS  
+   - Radar管道：20 GFLOPS
+   - 理论加速比：$S_{TLP} = \min(3, N_{processors})$
 
-$$T_{critical} = \max_{path \in G} \sum_{v \in path} d(v)$$
+2. **数据级并行(Data-Level Parallelism, DLP)**
+   
+   对于张量操作$T \in \mathbb{R}^{d_1 \times d_2 \times ... \times d_n}$：
+   $$DLP = \prod_{i=1}^{n} d_i$$
+   
+   矩阵乘法$C = A \times B$的并行分解：
+   $$C_{ij} = \sum_{k=1}^{K} A_{ik} \times B_{kj}$$
+   
+   可并行的乘累加操作数：$DLP_{GEMM} = M \times N$
+   
+   SIMD效率：$\eta_{SIMD} = \frac{vector\_length}{\lceil \frac{data\_size}{vector\_length} \rceil \times vector\_length}$
 
-这个关键路径决定了计算的最小执行时间，即使有无限的硬件资源也无法突破这个下界。理想并行度定义为：
+3. **流水线并行(Pipeline Parallelism)**
+   
+   对于$L$级流水线，稳态吞吐量：
+   $$Throughput = \frac{1}{\max_{i \in [1,L]} latency_i}$$
+   
+   流水线效率：
+   $$\eta_{pipeline} = \frac{\sum_{i=1}^{L} latency_i}{L \times \max_i latency_i}$$
+   
+   启动延迟：$T_{startup} = \sum_{i=1}^{L} latency_i$
+   填充率：$Fill\_rate = \frac{N}{N + L - 1}$，其中$N$是处理的数据批次
 
-$$P_{ideal} = \frac{\sum_{v \in V} d(v)}{T_{critical}}$$
+**并行度的定量分析**
 
-理想并行度表示了在资源不受限的情况下，可以达到的最大加速比。然而，实际系统中的并行度受到多种因素限制，包括硬件资源数量、存储带宽、互连拓扑等。有效并行度的计算需要考虑这些约束：
+并行度分析是评估架构效率的核心。设图 $G = (V, E)$，其中节点 $v \in V$ 的计算延迟为 $d(v)$。
 
-$$P_{effective} = \min(P_{ideal}, P_{resource}, P_{bandwidth}, P_{communication})$$
+**关键路径分析**
 
-其中，$P_{resource}$是资源限制的并行度，$P_{bandwidth}$是带宽限制的并行度，$P_{communication}$是通信限制的并行度。
+关键路径通过动态规划计算：
+$$T_{critical} = \max_{v \in V} EST(v) + d(v)$$
+
+其中最早开始时间(EST)递归定义：
+$$EST(v) = \begin{cases}
+0 & \text{if } v \text{ is source} \\
+\max_{u \in pred(v)} [EST(u) + d(u)] & \text{otherwise}
+\end{cases}$$
+
+**多维并行度模型**
+
+1. **理想并行度（Ideal Parallelism）**：
+   $$P_{ideal} = \frac{W}{T_{critical}} = \frac{\sum_{v \in V} d(v)}{T_{critical}}$$
+   
+   这是Brent定理的上界，表示无限资源下的最大加速比。
+
+2. **资源受限并行度（Resource-Constrained Parallelism）**：
+   $$P_{resource} = \min\left(P_{ideal}, \sum_{r \in R} N_r\right)$$
+   
+   其中$N_r$是资源类型$r$的数量。
+
+3. **带宽受限并行度（Bandwidth-Constrained Parallelism）**：
+   
+   使用Little's Law：$P_{bandwidth} = BW \times L$
+   
+   其中$BW$是带宽，$L$是平均延迟。对于计算密集型：
+   $$P_{bandwidth} = \frac{BW_{memory}}{bytes\_per\_op \times ops\_per\_second}$$
+
+4. **通信受限并行度（Communication-Constrained Parallelism）**：
+   
+   基于BSP模型：
+   $$P_{communication} = \frac{W}{W/p + g \cdot h + l}$$
+   
+   其中$p$是处理器数，$g$是带宽因子，$h$是通信量，$l$是同步延迟。
+
+**有效并行度综合模型**
+
+$$P_{effective} = \left(\frac{1}{P_{ideal}} + \frac{1}{P_{resource}} + \frac{1}{P_{bandwidth}} + \frac{1}{P_{communication}}\right)^{-1}$$
+
+这是调和平均数，反映了最弱环节的限制作用。
+
+**Amdahl定律的数据流扩展**
+
+$$Speedup = \frac{1}{(1-f) + \frac{f}{P_{effective}} + \alpha \cdot \log P_{effective}}$$
+
+其中$\alpha \cdot \log P_{effective}$项表示调度和同步开销。
 
 **图优化与变换**
 
