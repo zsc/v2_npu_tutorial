@@ -254,75 +254,270 @@ $$\hat{T}_{ensemble} = \sum_{m=1}^{M} w_m \hat{T}_m$$
 
 ## 2. 瓶颈识别技术
 
+瓶颈识别是性能优化的前提。准确定位系统瓶颈需要综合运用多种分析技术，从不同角度审视系统行为。在NPU系统中，瓶颈可能出现在计算、存储、互连等任何环节，且往往随工作负载动态变化。对于200 TOPS的NPU设计，瓶颈识别尤为关键，因为任何一个子系统的不足都可能导致整体性能无法达标。本节将介绍三种核心的瓶颈识别技术：Roofline分析、关键路径分析和资源利用率分析。
+
 ### 2.1 Roofline分析
 
-Roofline模型是分析计算密集度和内存带宽限制的经典方法。
+Roofline模型是分析计算密集度和内存带宽限制的经典方法，由Berkeley的Williams等人于2009年提出。它通过一个直观的二维图形，展示了在给定硬件平台上，不同算术强度的程序能够达到的性能上界。Roofline模型的核心洞察是：程序性能受限于计算能力或内存带宽中的较弱者。这个简单而深刻的观察为性能优化提供了清晰的方向。
 
 #### 2.1.1 基本Roofline模型
 
-性能上界由两个限制因素决定：
+Roofline模型的数学基础建立在性能、算术强度和带宽的关系上。性能上界由两个限制因素决定：
 $$P_{max} = \min(P_{peak}, I \times BW_{mem})$$
 
-其中算术强度（Arithmetic Intensity）：
+这个公式定义了性能的"屋顶线"：当算术强度较低时，性能受内存带宽限制（斜线部分）；当算术强度足够高时，性能受计算峰值限制（水平线部分）。两条线的交点称为"ridge point"，其对应的算术强度为：
+$$I_{ridge} = \frac{P_{peak}}{BW_{mem}}$$
+
+对于200 TOPS的NPU，假设HBM带宽为1TB/s，则ridge point为200 OPs/Byte。这意味着算术强度低于200的算子将受内存带宽限制，这在实际应用中很常见。
+
+算术强度（Arithmetic Intensity）是理解程序性能特征的关键指标：
 $$I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$
 
-对于不同算子的算术强度：
-- GEMM：$I_{GEMM} = \frac{2MNK}{(MK + KN + MN) \times sizeof(dtype)}$
-- Conv2D：$I_{conv} = \frac{2 \times C_{out} \times C_{in} \times K_h \times K_w \times H_{out} \times W_{out}}{Data_{transferred}}$
-- Attention：$I_{attn} = \frac{4N^2d + 2N^2}{(3Nd + 2N^2) \times sizeof(dtype)}$
+算术强度的计算需要仔细考虑数据重用。理论算术强度假设完美的缓存利用，而实际算术强度受缓存大小和替换策略影响。例如，矩阵乘法的理论算术强度为O(N)，但当矩阵无法完全装入缓存时，实际算术强度会显著降低。
+
+对于不同算子的算术强度分析：
+
+**GEMM的算术强度**：
+$$I_{GEMM} = \frac{2MNK}{(MK + KN + MN) \times sizeof(dtype)}$$
+
+当M=N=K时，简化为：
+$$I_{GEMM} = \frac{2N^3}{3N^2 \times sizeof(dtype)} = \frac{2N}{3 \times sizeof(dtype)}$$
+
+这表明GEMM的算术强度与矩阵大小成正比。对于N=1024的INT8 GEMM，算术强度约为683 OPs/Byte，远高于ridge point，因此是计算受限的。但对于小矩阵（如N=32），算术强度仅为21 OPs/Byte，成为内存受限。
+
+**Conv2D的算术强度**：
+卷积的算术强度计算更复杂，需要考虑输入特征图、卷积核和输出特征图的数据传输：
+$$I_{conv} = \frac{2 \times C_{out} \times C_{in} \times K_h \times K_w \times H_{out} \times W_{out}}{Data_{transferred}}$$
+
+其中数据传输量包括：
+- 输入：$H_{in} \times W_{in} \times C_{in} \times sizeof(dtype)$
+- 权重：$K_h \times K_w \times C_{in} \times C_{out} \times sizeof(dtype)$
+- 输出：$H_{out} \times W_{out} \times C_{out} \times sizeof(dtype)$
+
+对于深度卷积（depthwise convolution），算术强度显著降低：
+$$I_{depthwise} = \frac{2 \times K_h \times K_w \times H_{out} \times W_{out}}{(H_{in} \times W_{in} + K_h \times K_w + H_{out} \times W_{out}) \times sizeof(dtype)}$$
+
+典型的3×3深度卷积算术强度仅为6-10 OPs/Byte，是严重的内存受限操作。
+
+**Attention的算术强度**：
+自注意力机制包含多个阶段，每个阶段有不同的算术强度：
+$$I_{attn} = \frac{4N^2d + 2N^2}{(3Nd + 2N^2) \times sizeof(dtype)}$$
+
+当序列长度N较大时，QK^T矩阵乘法的算术强度接近N/2；当N较小时，QKV投影的算术强度接近4d/3。这种变化使得Attention的优化策略需要根据具体参数调整。
 
 #### 2.1.2 层次化Roofline
 
-考虑多级存储层次：
+现代NPU采用多级存储层次，每一级都有自己的带宽限制。层次化Roofline模型将这种复杂性可视化，帮助识别不同存储级别的瓶颈。
+
 ```
       Performance (TFLOPS)
            ▲
-           │     ╱─── L1 Cache Roofline
-           │   ╱╱─────── L2 Cache Roofline  
-           │ ╱╱─────────── DRAM Roofline
-           │╱
+       200 ├────────────────────────── Peak Compute
+           │     ╱─── L1 Cache Roofline (10TB/s)
+       100 │   ╱╱─────── L2 Cache Roofline (2TB/s)
+           │ ╱╱─────────── HBM Roofline (1TB/s)
+        10 │╱╱───────────────── DDR Roofline (100GB/s)
            └────────────────────────▶
-                Arithmetic Intensity (FLOPs/Byte)
+            1   10   100  1000   Arithmetic Intensity (OPs/Byte)
 ```
+
+每条斜线代表一个存储级别的带宽限制。程序的实际性能受最低的roofline限制。这个模型揭示了数据局部性的重要性：即使算子的算术强度很高，如果数据频繁溢出到低层存储，性能仍会严重下降。
+
+**缓存层次的影响分析**：
+
+L1缓存通常最接近计算单元，具有极高的带宽（>10TB/s）但容量有限（<1MB）。对于能够完全在L1中执行的小kernel，性能可以接近峰值。例如，1×1卷积的权重通常很小，可以常驻L1，因此能达到很高的性能。
+
+L2缓存提供了容量和带宽的平衡（几MB容量，几TB/s带宽）。大部分卷积和矩阵乘法的working set可以装入L2。通过合理的tiling，可以将大部分数据访问限制在L2内，避免访问外部存储。
+
+HBM/DDR是片外存储，带宽相对有限但容量大。对于大模型推理，权重通常存储在HBM中。HBM3提供约1TB/s的带宽，相比DDR4的100GB/s有显著提升，但成本和功耗也更高。
 
 ### 2.2 关键路径分析
 
-识别限制整体性能的关键执行路径。
+关键路径分析是识别程序执行瓶颈的基础技术。在并行系统中，整体执行时间由最长的执行路径决定，即关键路径。对于NPU这样的高度并行系统，关键路径分析帮助我们理解哪些操作序列限制了整体性能，以及增加并行资源是否能带来性能提升。关键路径不仅包括计算操作，还包括数据传输、同步等待等所有影响执行时间的因素。
 
 #### 2.2.1 数据依赖图构建
 
-构建计算图 $G = (V, E)$，其中：
-- 节点 $v \in V$ 表示操作
-- 边 $e \in E$ 表示数据依赖
+数据依赖图是进行关键路径分析的基础数据结构。它将程序执行抽象为有向无环图（DAG），清晰地展示操作之间的依赖关系。
 
-关键路径长度：
+构建计算图 $G = (V, E)$，其中：
+- 节点 $v \in V$ 表示操作（计算、数据传输、同步等）
+- 边 $e \in E$ 表示数据依赖或控制依赖
+- 节点权重 $w(v)$ 表示操作的执行时间
+- 边权重 $w(e)$ 表示数据传输或同步开销
+
+**依赖类型分析**：
+
+真数据依赖（RAW - Read After Write）：后续操作需要前序操作的结果。这是最常见的依赖类型，如卷积层的输出作为下一层的输入。
+$$v_j \text{ depends on } v_i \Leftrightarrow v_j \text{ reads data produced by } v_i$$
+
+反依赖（WAR - Write After Read）：在流水线执行中，写操作必须等待读操作完成。虽然在函数式的神经网络中较少见，但在原地操作（in-place operation）时需要考虑。
+
+输出依赖（WAW - Write After Write）：多个操作写入同一位置时的顺序约束。在NPU中，这常见于累加操作和reduce操作。
+
+**图构建算法**：
+
+依赖图的构建需要遍历整个计算图，识别所有的数据流动和控制流动。对于深度学习模型，可以从高层IR（如ONNX、TensorFlow Graph）自动构建：
+
+1. 遍历所有操作，创建节点
+2. 对每个操作的输入，找到产生该输入的操作，建立依赖边
+3. 标注每个节点的执行时间（通过性能模型或实测获得）
+4. 识别并标注关键的同步点
+
+关键路径长度的计算使用动态规划：
 $$CP = \max_{path \in G} \sum_{v \in path} latency(v)$$
+
+更精确的表达考虑了边的权重：
+$$CP = \max_{v \in V} (earliest\_start(v) + latency(v))$$
+
+其中最早开始时间递归定义为：
+$$earliest\_start(v) = \max_{u \in pred(v)} (earliest\_start(u) + latency(u) + transfer(u,v))$$
+
+**关键路径的动态性**：
+
+在实际执行中，关键路径可能因为以下因素动态变化：
+- 数据相关的分支（如动态shape）
+- 资源竞争导致的额外等待
+- 缓存命中率的变化
+- 动态调度的决策
+
+因此，需要通过profiling收集多次执行的统计信息，识别统计意义上的关键路径。
 
 #### 2.2.2 并行度分析
 
-理论并行度：
+并行度分析量化了程序的并行潜力，帮助判断增加硬件资源是否能提升性能。
+
+**理论并行度**：
 $$P_{max} = \frac{Total\_Work}{Critical\_Path\_Length}$$
 
-实际可达并行度受限于：
-$$P_{achievable} = \min(P_{max}, P_{hardware}, \frac{BW_{mem}}{BW_{required}})$$
+这个指标表示在无限资源下能达到的最大加速比。对于典型的CNN，理论并行度可达数千；但对于RNN等序列模型，由于时间步之间的依赖，并行度受限。
+
+**平均并行度**：
+考虑执行过程中的并行度变化：
+$$P_{avg} = \frac{\sum_{t} active\_ops(t)}{T_{total}}$$
+
+平均并行度反映了执行过程中的资源利用情况。波动的并行度意味着存在负载不均衡。
+
+**实际可达并行度**受多个因素限制：
+$$P_{achievable} = \min(P_{max}, P_{hardware}, \frac{BW_{mem}}{BW_{required}}, P_{sync})$$
+
+其中：
+- $P_{hardware}$：硬件提供的并行处理能力
+- $\frac{BW_{mem}}{BW_{required}}$：内存带宽限制的并行度
+- $P_{sync}$：同步开销限制的有效并行度
+
+**Amdahl定律的应用**：
+当程序包含串行部分时，加速比受限：
+$$Speedup = \frac{1}{s + \frac{1-s}{P}}$$
+
+其中$s$是串行部分的比例。对于NPU，串行部分包括：
+- 控制流处理
+- 全局同步
+- IO操作
+
+即使并行部分可以无限加速，串行部分仍会成为瓶颈。这解释了为什么某些模型在大规模NPU上的扩展效率较低。
+
+**并行效率分析**：
+$$Efficiency = \frac{Speedup}{P} = \frac{T_1}{P \times T_P}$$
+
+并行效率随着处理器数量增加通常会下降，原因包括：
+- 通信开销增加
+- 负载不均衡加剧
+- 同步频率提高
+
+对于200 TOPS的NPU（约10万个MAC单元），保持50%以上的并行效率是巨大挑战。
 
 ### 2.3 资源利用率分析
 
+资源利用率分析提供了系统效率的直接度量。低利用率意味着硬件资源的浪费，识别利用率瓶颈是优化的第一步。NPU的资源包括计算单元、存储带宽、片上缓存等，每种资源都可能成为瓶颈。
+
 #### 2.3.1 计算资源利用率
 
-MAC单元利用率：
+计算资源是NPU最昂贵的部分，其利用率直接影响投资回报。
+
+**瞬时MAC利用率**：
+$$\eta_{MAC}(t) = \frac{Active\_MACs(t)}{Total\_MACs}$$
+
+瞬时利用率的时间序列揭示了执行过程中的效率波动。理想情况下，利用率应该保持稳定且接近100%。
+
+**平均MAC利用率**：
 $$\eta_{MAC} = \frac{\sum_{t} Active\_MACs(t)}{Total\_MACs \times T_{total}}$$
 
-利用率分解：
+平均利用率是评估整体效率的关键指标。对于生产环境的NPU，通常目标是达到70%以上的平均利用率。
+
+**利用率分解分析**：
 $$\eta_{MAC} = \eta_{mapping} \times \eta_{schedule} \times \eta_{stall}$$
+
+其中：
+- $\eta_{mapping}$：映射效率，反映问题规模与硬件规模的匹配程度
+- $\eta_{schedule}$：调度效率，反映任务调度和负载均衡的效果
+- $\eta_{stall}$：流水线效率，反映由于数据等待导致的停顿
+
+**映射效率的详细分析**：
+
+对于脉动阵列，映射效率取决于矩阵维度与阵列大小的关系：
+$$\eta_{mapping} = \frac{\lceil M/M_{tile} \rceil \times M_{tile} \times \lceil N/N_{tile} \rceil \times N_{tile}}{M \times N} \times \frac{M \times N}{M_{array} \times N_{array} \times \lceil M/M_{tile} \rceil \times \lceil N/N_{tile} \rceil}$$
+
+第一项是padding开销，第二项是硬件利用率。当矩阵维度不是tile大小的整数倍时，需要padding，导致效率损失。
+
+**动态负载特征分析**：
+
+不同层的计算密度差异很大。在ResNet-50中：
+- 第一层（7×7卷积）：计算量小但带宽需求高
+- 中间层（3×3卷积）：计算密度适中
+- 最后的FC层：计算密度高但占总计算量比例小
+
+这种不均匀性导致很难在所有层都达到高利用率。
 
 #### 2.3.2 存储资源利用率
 
-片上缓存命中率：
-$$Hit\_Rate = \frac{N_{hits}}{N_{hits} + N_{misses}}$$
+存储系统的效率对NPU性能至关重要，特别是对于内存受限的操作。
 
-有效带宽：
-$$BW_{eff} = BW_{peak} \times (Hit\_Rate + (1-Hit\_Rate) \times \frac{BW_{external}}{BW_{peak}})$$
+**缓存命中率**：
+$$Hit\_Rate_L = \frac{N_{hits,L}}{N_{hits,L} + N_{misses,L}}$$
+
+分层的命中率分析：
+- L1命中率：通常>90%，对性能影响最大
+- L2命中率：目标>80%，影响外部带宽需求
+- TLB命中率：影响地址转换开销
+
+**有效带宽分析**：
+$$BW_{eff} = BW_{peak} \times \eta_{protocol} \times (1 - p_{conflict}) \times \eta_{burst}$$
+
+其中：
+- $\eta_{protocol}$：协议效率，考虑命令和地址开销
+- $p_{conflict}$：bank冲突概率
+- $\eta_{burst}$：突发传输效率
+
+**存储带宽利用的时间分布**：
+
+带宽利用往往呈现突发特征：
+- 层切换时的权重加载导致带宽峰值
+- 计算阶段带宽需求降低
+- 输出写回时的带宽突发
+
+平滑带宽需求的技术包括：
+- 预取（prefetching）：提前加载下一层的数据
+- 双缓冲（double buffering）：计算与数据传输重叠
+- 数据压缩：减少传输量
+
+**Bank冲突的详细分析**：
+
+Bank冲突概率与访问模式密切相关：
+$$p_{conflict} = 1 - \prod_{i=1}^{N_{access}} \left(1 - \frac{occupied\_banks(i)}{Total\_banks}\right)$$
+
+对于stride访问模式：
+- Stride为bank数量的因子时，冲突严重
+- 素数个bank可以缓解规律性冲突
+- 地址哈希可以打散访问模式
+
+**内存访问模式优化**：
+
+不同的数据布局导致不同的访问模式：
+- NCHW：适合卷积操作，空间局部性好
+- NHWC：适合depthwise操作，通道并行友好
+- Tiled layout：平衡各维度的局部性
+
+选择合适的数据布局可以显著提升缓存命中率和带宽利用率。
 
 ## 3. 优化案例研究
 
