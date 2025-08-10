@@ -258,6 +258,196 @@
    - 空间并行：利用脉动阵列的空间并行性</p>
 </li>
 </ol>
+<p><strong>HLO的语义规范与类型系统</strong>：</p>
+<p>HLO指令集包含约100个原语（primitives），每个都有精确的语义定义。这些原语覆盖了深度学习的主要计算模式：</p>
+<ol>
+<li>
+<p><strong>元素级操作（Elementwise）</strong>：
+   - 算术运算：Add、Multiply、Divide、Subtract、Power、Remainder
+   - 比较运算：Equal、NotEqual、Greater、Less、GreaterOrEqual、LessOrEqual
+   - 逻辑运算：And、Or、Not、Xor
+   - 数学函数：Exp、Log、Sqrt、Tanh、Sin、Cos、Abs、Sign、Round、Floor、Ceil
+   - 类型转换：Convert、BitcastConvert、Real、Imag、Complex</p>
+</li>
+<li>
+<p><strong>张量操作（Tensor）</strong>：
+   - 形状操作：Reshape、Broadcast、Squeeze、ExpandDims、Transpose
+   - 切片操作：Slice、DynamicSlice、Gather、Scatter
+   - 拼接操作：Concatenate、Pad、Reverse
+   - 索引操作：Iota、DynamicUpdateSlice</p>
+</li>
+<li>
+<p><strong>归约操作（Reduction）</strong>：
+   - 基本归约：Reduce、ReduceSum、ReduceProduct、ReduceMin、ReduceMax
+   - 窗口归约：ReduceWindow、SelectAndScatter
+   - 分组归约：ReduceScatter、AllReduce
+   - 自定义归约：支持用户定义的归约函数</p>
+</li>
+<li>
+<p><strong>矩阵操作（Matrix）</strong>：
+   - 矩阵乘法：Dot、DotGeneral（支持批处理和收缩维度）
+   - 卷积：Convolution（支持各种padding、stride、dilation）
+   - 矩阵分解：Cholesky、QR、SVD（部分支持）</p>
+</li>
+<li>
+<p><strong>控制流（Control Flow）</strong>：
+   - 条件执行：Conditional（if-then-else语义）
+   - 循环：While（支持多个循环携带值）
+   - 函数调用：Call、Map（映射函数到张量元素）
+   - 动态控制：Switch、Case（多路分支）</p>
+</li>
+<li>
+<p><strong>通信原语（Communication）</strong>：
+   - 集合通信：AllToAll、AllGather、AllReduce、ReduceScatter
+   - 点对点通信：Send、Recv、SendDone、RecvDone
+   - 同步：Barrier、CrossReplicaSum</p>
+</li>
+</ol>
+<p>HLO的类型系统建立在形状（Shape）概念之上：</p>
+<div class="codehilite"><pre><span></span><code><span class="nx">Shape</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">(</span><span class="nx">element_type</span><span class="p">,</span><span class="w"> </span><span class="nx">dimensions</span><span class="p">,</span><span class="w"> </span><span class="nx">layout</span><span class="p">)</span>
+</code></pre></div>
+
+<p>其中：</p>
+<ul>
+<li><code>element_type</code>：数据类型（F16、F32、F64、S8、S16、S32、S64、U8、U16、U32、U64、PRED、C64、C128）</li>
+<li><code>dimensions</code>：各维度大小的数组，如[batch, height, width, channels]</li>
+<li><code>layout</code>：维度的物理存储顺序，如{3,2,1,0}表示NHWC布局</li>
+</ul>
+<p><strong>形状推断与验证</strong>：</p>
+<p>XLA在构建HLO图时执行严格的形状推断和类型检查：</p>
+<ol>
+<li>
+<p><strong>前向推断（Forward Inference）</strong>：
+   从输入形状推导输出形状。例如，对于矩阵乘法：
+   $$\text{Dot}([M, K], [K, N]) \rightarrow [M, N]$$
+对于卷积操作，输出形状计算：
+$$H_{out} = \lfloor \frac{H_{in} + 2 \times \text{pad}_h - \text{dilation}_h \times (K_h - 1) - 1}{\text{stride}_h} \rfloor + 1$$</p>
+</li>
+<li>
+<p><strong>反向推断（Backward Inference）</strong>：
+   某些情况下从输出形状反推输入形状，用于验证和优化。</p>
+</li>
+<li>
+<p><strong>广播规则（Broadcasting）</strong>：
+   XLA支持NumPy风格的广播，但要求显式的Broadcast操作：</p>
+</li>
+</ol>
+<ul>
+<li>标量自动广播到任意形状</li>
+<li>维度为1的轴可以广播到任意大小</li>
+<li>缺失的维度从前面补充</li>
+</ul>
+<ol start="4">
+<li><strong>动态形状支持（Dynamic Shapes）</strong>：
+   虽然XLA主要针对静态形状，但也提供有限的动态形状支持：</li>
+</ol>
+<ul>
+<li>SetDimensionSize：动态设置某个维度大小</li>
+<li>GetDimensionSize：获取动态维度大小</li>
+<li>动态形状的限制：必须有上界，某些优化不可用</li>
+</ul>
+<p><strong>HLO的中间表示特性</strong>：</p>
+<ol>
+<li>
+<p><strong>不可变性（Immutability）</strong>：
+   HLO采用纯函数式设计，所有操作产生新值而不修改现有值。这简化了分析和优化，避免了别名分析的复杂性。</p>
+</li>
+<li>
+<p><strong>单赋值（Single Assignment）</strong>：
+   每个HLO指令产生一个唯一的值，该值只被定义一次。这类似于SSA形式，使得def-use链清晰明确。</p>
+</li>
+<li>
+<p><strong>显式依赖（Explicit Dependencies）</strong>：
+   所有数据和控制依赖都在图中显式表示，没有隐式的副作用或全局状态。</p>
+</li>
+<li>
+<p><strong>嵌套结构（Nested Structure）</strong>：
+   HLO支持嵌套的计算（Computation），用于表示函数、循环体、条件分支等。每个Computation是一个独立的图，有自己的参数和返回值。</p>
+</li>
+</ol>
+<p><strong>优化Pass的实现机制</strong>：</p>
+<p>XLA的优化器采用Pass管理器架构，每个Pass是一个独立的转换：</p>
+<ol>
+<li><strong>Pass接口设计</strong>：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">HloPass</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="n">StatusOr</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="w"> </span><span class="n">Run</span><span class="p">(</span><span class="n">HloModule</span><span class="o">*</span><span class="w"> </span><span class="k">module</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="n">string</span><span class="w"> </span><span class="nf">name</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>Pass Pipeline组织</strong>：
+   优化Passes被组织成多个阶段的pipeline：</li>
+</ol>
+<ul>
+<li><strong>目标无关优化</strong>：代数简化、CSE、DCE等</li>
+<li><strong>目标相关优化</strong>：针对TPU的特定优化</li>
+<li><strong>后端优化</strong>：指令选择、调度、寄存器分配</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>Pass依赖管理</strong>：
+   某些Pass依赖其他Pass的结果，Pass管理器确保正确的执行顺序。例如，算子融合需要在内存分配之前完成。</p>
+</li>
+<li>
+<p><strong>迭代优化（Iterative Optimization）</strong>：
+   某些优化需要多次迭代直到达到固定点。例如，死代码消除可能暴露新的优化机会。</p>
+</li>
+</ol>
+<p><strong>Pattern Matching与重写规则</strong>：</p>
+<p>XLA使用模式匹配来识别优化机会：</p>
+<ol>
+<li><strong>模式描述语言</strong>：
+   使用C++模板和匹配器组合来描述模式：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">m</span><span class="o">::</span><span class="n">Dot</span><span class="p">(</span><span class="n">m</span><span class="o">::</span><span class="n">Op</span><span class="p">(),</span><span class="w"> </span><span class="n">m</span><span class="o">::</span><span class="n">Transpose</span><span class="p">(</span><span class="n">m</span><span class="o">::</span><span class="n">Op</span><span class="p">()));</span><span class="w">  </span><span class="c1">// 匹配 A @ B^T</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>重写规则（Rewrite Rules）</strong>：
+   定义模式匹配后的转换规则：</li>
+</ol>
+<ul>
+<li>强度削减：$x^2 \rightarrow x * x$</li>
+<li>恒等消除：$x + 0 \rightarrow x$</li>
+<li>结合律应用：$(a + b) + c \rightarrow a + (b + c)$</li>
+</ul>
+<ol start="3">
+<li><strong>代价模型（Cost Model）</strong>：
+   评估转换是否有益，考虑：</li>
+</ol>
+<ul>
+<li>计算复杂度降低</li>
+<li>内存访问减少</li>
+<li>硬件特性匹配</li>
+</ul>
+<p><strong>Profile-Guided Optimization（PGO）</strong>：</p>
+<p>XLA支持基于性能剖析的优化：</p>
+<ol>
+<li>
+<p><strong>性能数据收集</strong>：
+   - 指令执行时间
+   - 内存带宽使用
+   - Cache命中率
+   - 能耗信息</p>
+</li>
+<li>
+<p><strong>反馈驱动优化</strong>：
+   - 热点路径识别
+   - 关键路径优化
+   - 资源分配调整</p>
+</li>
+<li>
+<p><strong>自适应编译</strong>：
+   根据运行时反馈调整编译策略：</p>
+</li>
+</ol>
+<ul>
+<li>重新编译热点代码</li>
+<li>调整tiling参数</li>
+<li>改变算子映射策略</li>
+</ul>
 <h3 id="712">7.1.2 算子融合策略</h3>
 <p>算子融合（Operator Fusion）是XLA编译器最重要的优化技术之一，其核心思想是将多个细粒度算子合并为粗粒度的融合算子，从而减少内存访问开销并提高计算密度。在TPU等专用加速器上，内存带宽往往是性能瓶颈，算子融合通过减少中间结果的存储和读取，可以带来显著的性能提升。融合策略的设计需要在多个维度进行权衡：融合范围、资源约束、数值精度和硬件特性。</p>
 <p>算子融合的理论基础源于计算强度（Computational Intensity）的概念，定义为算术运算次数与内存访问字节数的比值。通过融合，我们可以提高整体的计算强度，使其更接近硬件的峰值计算强度（由计算吞吐量与内存带宽的比值决定）。根据Roofline模型，当计算强度低于硬件峰值时，程序性能受内存带宽限制；融合通过减少内存访问，将程序推向计算受限区域，从而提高硬件利用率。</p>
@@ -267,7 +457,7 @@
 <ul>
 <li>
 <p><strong>内存容量约束</strong>：融合后的工作集（working set）必须适配片上SRAM。工作集大小计算公式为：
-  $$W = \sum_{i \in \text{inputs}} S_i + \sum_{t \in \text{temps}} S_t + \sum_{o \in \text{outputs}} S_o$$
+$$W = \sum_{i \in \text{inputs}} S_i + \sum_{t \in \text{temps}} S_t + \sum_{o \in \text{outputs}} S_o$$
 其中$S_i$、$S_t$、$S_o$分别表示输入、临时变量和输出的大小</p>
 </li>
 <li>
@@ -342,6 +532,176 @@ $$\text{Speedup} = \frac{\sum_{i} T_i}{\max_j(T_j) + T_{\text{overhead}}}$$
 <li>INT8和FP16混合：在同一kernel中处理不同精度</li>
 <li>动态量化：融合量化和反量化操作</li>
 <li>精度转换优化：最小化类型转换开销</li>
+</ul>
+<p><strong>循环融合（Loop Fusion）</strong>：
+循环融合是另一类重要的融合技术，它合并具有相同或兼容迭代空间的循环，减少循环开销并提高数据局部性。</p>
+<p>循环融合的条件与约束：</p>
+<ol>
+<li>
+<p><strong>依赖关系分析</strong>：
+   - 无循环携带依赖（Loop-Carried Dependency）
+   - 数据流方向兼容
+   - 写后读（RAW）、读后写（WAR）、写后写（WAW）冲突检测</p>
+</li>
+<li>
+<p><strong>迭代空间对齐</strong>：
+   - 循环边界匹配或可调整
+   - 步长（stride）兼容
+   - 嵌套层次一致</p>
+</li>
+<li>
+<p><strong>内存访问模式</strong>：
+   - 访问模式相似，避免cache冲突
+   - 工作集大小不超过cache容量
+   - 预取策略兼容</p>
+</li>
+</ol>
+<p>循环融合的类型：</p>
+<ol>
+<li><strong>完全融合（Perfect Fusion）</strong>：
+   两个循环完全合并为一个</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="n">原始</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">]</span>
+<span class="w">     </span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span><span class="n">D</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">E</span><span class="o">[</span><span class="n">i</span><span class="o">]</span>
+<span class="n">融合</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span>
+<span class="w">        </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">]</span>
+<span class="w">        </span><span class="n">D</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">E</span><span class="o">[</span><span class="n">i</span><span class="o">]</span>
+</code></pre></div>
+
+<ol start="2">
+<li><strong>部分融合（Partial Fusion）</strong>：
+   循环部分重叠，需要prolog/epilog处理</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="n">原始</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="o">[</span><span class="n">0, N): A[i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">     </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="o">[</span><span class="n">M, N+M): B[i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="n">融合</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="o">[</span><span class="n">0, M): A[i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">     </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="o">[</span><span class="n">M, N): A[i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">     </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="o">[</span><span class="n">N, N+M): B[i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+</code></pre></div>
+
+<ol start="3">
+<li><strong>嵌套融合（Nested Fusion）</strong>：
+   多层嵌套循环的融合</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="n">原始</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nl">j</span><span class="p">:</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">     </span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nl">j</span><span class="p">:</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">...</span>
+<span class="n">融合</span><span class="err">：</span><span class="k">for</span><span class="w"> </span><span class="nl">i</span><span class="p">:</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nl">j</span><span class="p">:</span>
+<span class="w">        </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span>
+<span class="w">        </span><span class="n">B</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">...</span>
+</code></pre></div>
+
+<p><strong>算子融合的高级模式</strong>：</p>
+<ol>
+<li><strong>纵深融合（Depth Fusion）</strong>：
+   融合整个子图，形成超级算子（Super Operator）</li>
+</ol>
+<ul>
+<li>ResNet块整体融合：Conv→BN→ReLU→Conv→BN→Add→ReLU</li>
+<li>Transformer层融合：MultiHeadAttention→Add→LayerNorm→FFN→Add→LayerNorm</li>
+<li>收益：减少80%以上的内存访问</li>
+</ul>
+<ol start="2">
+<li><strong>跨层融合（Cross-Layer Fusion）</strong>：
+   打破层边界，融合非相邻但有数据流关系的算子</li>
+</ol>
+<ul>
+<li>Skip connection融合：将残差连接与主路径融合</li>
+<li>梯度累积融合：反向传播中的梯度计算与累加</li>
+<li>挑战：需要全局数据流分析</li>
+</ul>
+<ol start="3">
+<li><strong>动态融合（Dynamic Fusion）</strong>：
+   运行时根据输入特征选择融合策略</li>
+</ol>
+<ul>
+<li>JIT编译：根据实际shape生成优化代码</li>
+<li>自适应融合：监控性能指标，动态调整</li>
+<li>模板特化：预编译多个版本，运行时选择</li>
+</ul>
+<p><strong>融合决策的机器学习方法</strong>：</p>
+<p>现代编译器越来越多地使用机器学习来指导融合决策：</p>
+<ol>
+<li>
+<p><strong>特征提取</strong>：
+   - 算子特征：类型、大小、计算复杂度
+   - 数据流特征：依赖关系、数据重用度
+   - 硬件特征：cache大小、带宽、计算能力</p>
+</li>
+<li>
+<p><strong>决策模型</strong>：
+   - 分类模型：预测是否应该融合
+   - 回归模型：预测融合后的性能提升
+   - 强化学习：序列决策，考虑全局最优</p>
+</li>
+<li>
+<p><strong>训练策略</strong>：
+   - 离线训练：使用历史数据训练模型
+   - 在线学习：根据实际执行反馈更新
+   - 迁移学习：从相似硬件/工作负载迁移知识</p>
+</li>
+</ol>
+<p><strong>融合的代码生成策略</strong>：</p>
+<p>算子融合后需要生成高效的融合kernel代码：</p>
+<ol>
+<li>
+<p><strong>模板实例化（Template Instantiation）</strong>：
+   - 预定义融合模板库
+   - 参数化模板，编译时实例化
+   - 优点：生成代码质量高
+   - 缺点：灵活性受限</p>
+</li>
+<li>
+<p><strong>代码拼接（Code Stitching）</strong>：
+   - 将独立kernel的代码片段拼接
+   - 处理数据流和同步
+   - 优点：灵活性高
+   - 缺点：可能有冗余计算</p>
+</li>
+<li>
+<p><strong>多面体代码生成（Polyhedral Code Generation）</strong>：
+   - 基于多面体模型的循环变换
+   - 自动生成优化的循环嵌套
+   - 优点：理论最优
+   - 缺点：编译时间长</p>
+</li>
+<li>
+<p><strong>DSL编译（Domain-Specific Language）</strong>：
+   - 使用高级DSL描述融合算子
+   - 编译到目标硬件代码
+   - 例如：Halide、TVM、Triton</p>
+</li>
+</ol>
+<p><strong>融合的性能建模与预测</strong>：</p>
+<p>准确预测融合收益是编译器决策的关键：</p>
+<ol>
+<li><strong>静态分析模型</strong>：
+$$\text{Benefit} = \text{MemSaved} \times BW - \text{ComputeOverhead} \times \frac{1}{Throughput}$$
+其中：</li>
+</ol>
+<ul>
+<li>MemSaved：节省的内存访问量</li>
+<li>BW：内存带宽</li>
+<li>ComputeOverhead：融合引入的额外计算</li>
+<li>Throughput：计算吞吐量</li>
+</ul>
+<ol start="2">
+<li><strong>动态性能模型</strong>：
+   考虑运行时因素：</li>
+</ol>
+<ul>
+<li>Cache命中率变化</li>
+<li>内存访问冲突</li>
+<li>指令流水线效率</li>
+<li>功耗和热节流</li>
+</ul>
+<ol start="3">
+<li><strong>概率模型</strong>：
+   处理不确定性：</li>
+</ol>
+<ul>
+<li>输入数据分布</li>
+<li>运行时资源竞争</li>
+<li>硬件性能波动</li>
 </ul>
 <h3 id="713">7.1.3 内存规划与分配</h3>
 <p>内存管理是NPU编译器的核心挑战之一，特别是在TPU这类片上存储容量受限的架构中。TPU采用了分层的存储体系：每个核心有私有的片上SRAM（如TPUv4i的32MB），多个核心共享HBM（144MB），以及系统级的主存。编译器必须精心编排数据在各级存储间的移动，以最大化数据重用并隐藏访存延迟。XLA采用静态内存管理策略，在编译时完成所有内存分配决策，避免了运行时的动态分配开销。</p>

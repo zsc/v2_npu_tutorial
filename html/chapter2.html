@@ -183,12 +183,32 @@
 <p>YOLO (You Only Look Once) 系列从v1到v8的演进体现了实时检测算法在精度和速度平衡上的持续优化。YOLOv8作为当前主流的实时检测网络，其backbone采用CSPDarknet架构，通过Cross Stage Partial连接减少计算量的同时保持特征表达能力。这种设计哲学对NPU架构提出了独特要求：需要高效支持残差连接、特征融合和多尺度处理。</p>
 <p><strong>演进历程的架构洞察：</strong></p>
 <p>从YOLOv1的全连接输出层到YOLOv8的解耦检测头，每代改进都反映了对硬件友好性的深入理解。YOLOv3引入的多尺度预测需要NPU支持高效的特征金字塔构建；YOLOv4的Mish激活和CSP结构要求灵活的激活函数单元；YOLOv5的Focus层通过空间到深度变换减少了早期层的计算量，这种pixel shuffle操作在NPU上可通过专门的数据重排单元加速。</p>
+<p>每一代YOLO的改进都隐含着对硬件限制的深刻理解：</p>
+<div class="codehilite"><pre><span></span><code>YOLOv1 (2016)              YOLOv3 (2018)              YOLOv5-8 (2020-2023)
+     │                          │                              │
+     ▼                          ▼                              ▼
+┌─────────┐              ┌──────────────┐            ┌──────────────────┐
+│全连接输出│              │多尺度FPN输出│            │解耦检测头+Anchor │
+│7×7×30   │              │13×13,26×26,  │            │Free设计          │
+│         │              │52×52         │            │                  │
+└─────────┘              └──────────────┘            └──────────────────┘
+     │                          │                              │
+     ▼                          ▼                              ▼
+内存瓶颈:                 计算分散:                    硬件友好:
+
+- FC层参数量大            - 3个独立head                - 统一的检测流程
+- 固定输入尺寸            - 不同stride特征             - 规则的tensor操作
+- 低分辨率限制            - anchor匹配开销             - 易于量化和剪枝
+</code></pre></div>
+
+<p>YOLOv8的架构创新特别强调了与现代AI加速器的协同设计。其C2f模块的split-transform-merge模式天然适合多核并行架构，每个分支可以映射到不同的计算核心。这种设计哲学与Google TPU的设计理念不谋而合：通过架构规则化换取硬件效率的最大化。</p>
 <p><strong>架构创新点：</strong></p>
 <ol>
-<li><strong>C2f模块设计</strong>：YOLOv8引入的C2f (Cross Stage Partial with 2 convolutions) 模块改进了YOLOv5的C3模块，通过更细粒度的特征分割实现了更好的梯度流动：
-   $$\text{C2f}(X) = \text{Concat}[\text{Conv}(X), \text{Bottleneck}_1(X_1), ..., \text{Bottleneck}_n(X_n)]$$
-这种结构在NPU上的映射需要考虑：</li>
+<li><strong>C2f模块设计</strong>：YOLOv8引入的C2f (Cross Stage Partial with 2 convolutions) 模块改进了YOLOv5的C3模块，通过更细粒度的特征分割实现了更好的梯度流动。</li>
 </ol>
+<p>C2f模块的设计精髓在于其分层特征复用策略：
+   $$\text{C2f}(X) = \text{Concat}[\text{Conv}(X), \text{Bottleneck}_1(X_1), ..., \text{Bottleneck}_n(X_n)]$$
+这种结构在NPU上的映射需要考虑：</p>
 <ul>
 <li>分支计算的并行化机会：每个Bottleneck可独立计算，适合多核并行</li>
 <li>Concat操作的内存重组开销：需要DMA单元支持scatter-gather操作</li>
@@ -197,16 +217,51 @@
 <p><strong>Bottleneck内部结构优化：</strong>
 $$\text{Bottleneck}(X) = X + \text{Conv}_{3 \times 3}(\text{Conv}_{1 \times 1}(X))$$
 这个残差结构的关键在于1×1卷积降维和3×3卷积特征提取的平衡。在200 TOPS NPU上，可以将1×1卷积映射到向量单元，3×3卷积映射到脉动阵列，实现异构计算单元的协同。</p>
-<ol start="2">
-<li>
-<p><strong>Anchor-free检测头</strong>：相比YOLOv5的anchor-based方法，YOLOv8采用了解耦检测头（Decoupled Head），将分类和回归任务分离：
-$$\text{Det}_{\text{cls}} = \text{Conv}_{3 \times 3}(\text{Conv}_{3 \times 3}(F)) \in \mathbb{R}^{H \times W \times N_{\text{cls}}}$$
-   $$\text{Det}_{\text{reg}} = \text{Conv}_{3 \times 3}(\text{Conv}_{3 \times 3}(F)) \in \mathbb{R}^{H \times W \times 4}$$
-解耦设计允许独立优化两个分支的量化策略。分类分支可以使用INT8量化（对类别预测的微小偏差不敏感），而回归分支保持FP16以确保边界框的精确定位。</p>
-</li>
-<li>
-<p><strong>TaskAligned Assigner的硬件影响</strong>：</p>
-</li>
+<p><strong>数据流分析</strong>：
+   ```
+   Input X ──┬──────────────────────────────► Addition ──► Output
+            │                                     ▲
+            └──► Conv1×1 ──► Conv3×3 ────────────┘
+                 (降维)      (特征提取)
+                 C→C/2       C/2→C/2→C</p>
+<p>内存访问模式:</p>
+<ul>
+<li>输入X读取: 1次</li>
+<li>中间特征: 保持在片上SRAM</li>
+<li>输出写回: 1次</li>
+<li>带宽需求: 2×H×W×C×sizeof(fp16)</li>
+</ul>
+<div class="codehilite"><pre><span></span><code><span class="err">这种设计使得整个</span><span class="n">Bottleneck可以在单次数据加载后完成计算</span><span class="err">，极大降低了</span><span class="n">DDR带宽压力</span><span class="err">。对于典型的</span><span class="n">C</span><span class="o">=</span><span class="mh">256</span><span class="err">通道，</span><span class="mh">80</span><span class="err">×</span><span class="mh">80</span><span class="err">特征图，单个</span><span class="n">Bottleneck仅需6</span><span class="mf">.5</span><span class="n">MB的DDR访问</span><span class="err">，而计算量达到</span><span class="mf">0.66</span><span class="w"> </span><span class="n">GFLOPs</span><span class="err">，算术强度高达</span><span class="mh">101</span><span class="w"> </span><span class="n">ops</span><span class="o">/</span><span class="kt">byte</span><span class="err">。</span>
+
+<span class="mf">2.</span><span class="w"> </span><span class="o">**</span><span class="n">Anchor</span><span class="o">-</span><span class="n">free检测头</span><span class="o">**</span><span class="err">：相比</span><span class="n">YOLOv5的anchor</span><span class="o">-</span><span class="n">based方法</span><span class="err">，</span><span class="n">YOLOv8采用了解耦检测头</span><span class="err">（</span><span class="n">Decoupled</span><span class="w"> </span><span class="n">Head</span><span class="err">），将分类和回归任务分离：</span>
+<span class="err">$$</span><span class="n">\text{Det}\_{\text{cls}}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">\text{Conv}\_{3</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="mh">3</span><span class="p">}(</span><span class="n">\text{Conv}\_{3</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="mh">3</span><span class="p">}(</span><span class="n">F</span><span class="p">))</span><span class="w"> </span><span class="n">\in</span><span class="w"> </span><span class="n">\mathbb{R}^{H</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="n">W</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="n">N\_{\text{cls}}}$$</span>
+<span class="err">$$</span><span class="n">\text{Det}\_{\text{reg}}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">\text{Conv}\_{3</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="mh">3</span><span class="p">}(</span><span class="n">\text{Conv}\_{3</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="mh">3</span><span class="p">}(</span><span class="n">F</span><span class="p">))</span><span class="w"> </span><span class="n">\in</span><span class="w"> </span><span class="n">\mathbb{R}^{H</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="n">W</span><span class="w"> </span><span class="n">\times</span><span class="w"> </span><span class="mh">4</span><span class="p">}</span><span class="err">$$</span>
+<span class="err">解耦设计允许独立优化两个分支的量化策略。分类分支可以使用</span><span class="n">INT8量化</span><span class="err">（对类别预测的微小偏差不敏感），而回归分支保持</span><span class="n">FP16以确保边界框的精确定位</span><span class="err">。</span>
+
+<span class="o">**</span><span class="err">硬件映射优化</span><span class="o">**</span><span class="err">：</span>
+</code></pre></div>
+
+<p>Backbone最后一层特征 F
+           │
+           ▼
+   ┌───────────────┐
+   │  共享Conv3×3  │ (256 channels)
+   └───────┬───────┘
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+   ┌─────┐   ┌─────┐
+   │Class│   │ Reg │
+   │Head │   │Head │
+   └─────┘   └─────┘
+     INT8      FP16</p>
+<p>Pipeline调度:
+   Stage 1: 共享特征提取 (利用率95%)
+   Stage 2: 并行双头计算 (利用率85%)
+   Stage 3: 后处理NMS   (利用率20%)
+   ```</p>
+<ol start="3">
+<li><strong>TaskAligned Assigner的硬件影响</strong>：</li>
 </ol>
 <p>YOLOv8采用的动态标签分配策略在训练时提高了正负样本的质量，但在推理时简化了后处理：
 $$\text{Alignment} = \text{cls_score}^{\alpha} \times \text{IoU}^{\beta}$$
@@ -224,12 +279,30 @@ $$\text{FLOPs}_{\text{backbone}} = \sum_{l=1}^{L} 2 \times C_{in}^{(l)} \times C
 </ul>
 <p><strong>层级计算密度分析：</strong></p>
 <p>不同stage的计算密度差异显著，影响NPU的资源调度：
-$$\text{Density}_{\text{stage}} = \frac{\text{FLOPs}_{\text{stage}}}{\text{Memory}_{\text{stage}}}$$</p>
+$$\text{Density}_{\text{stage}} = \frac{\text{FLOPs}_{\text{stage}}}{\text{Memory}_{\text{stage}}}$$
+每个stage的详细计算密度画像：</p>
 <ul>
 <li>浅层（Stage 1-2）：特征图大（320×320, 160×160），计算密度低（~10 ops/byte），memory-bound特征明显。这些层的优化重点在于提高内存带宽利用率，可采用深度可分离卷积或组卷积降低内存压力。</li>
 <li>中层（Stage 3-4）：计算密度适中（~50 ops/byte），是脉动阵列的理想工作负载。80×80和40×40的特征图大小恰好匹配典型的tile尺寸，可以实现接近峰值的计算效率。</li>
 <li>深层（Stage 5）：通道数多（1024通道），计算密度高（&gt;100 ops/byte），完全compute-bound。这里是应用2:4稀疏化的最佳位置，可以获得接近2倍的理论加速。</li>
 </ul>
+<div class="codehilite"><pre><span></span><code>计算密度 (ops/byte)
+200 ┤                                    ╱─── Stage 5 (Compute-bound)
+    │                                 ╱╱╱    适合稀疏化
+150 ┤                            ╱╱╱╱╱
+    │                       ╱╱╱╱╱        ← AI_ridge = 100
+100 ┤──────────────────╱╱╱╱╱─────────────── (200TOPS/2TB/s)
+    │              ╱╱╱╱╱ Stage 3-4
+ 50 ┤         ╱╱╱╱╱      (Balanced)        
+    │    ╱╱╱╱╱           适合脉动阵列
+ 10 ┤╱╱╱╱ Stage 1-2 (Memory-bound)
+    │     需要带宽优化
+  0 └────┬────┬────┬────┬────┬────┬────
+      P1/2  P2/4  P3/8 P4/16 P5/32 Head
+                  Network Depth →
+</code></pre></div>
+
+<p>这种计算密度的渐进式增长与生物视觉系统的分层处理类似：低层次提取简单特征（高带宽，低计算），高层次进行复杂推理（低带宽，高计算）。NPU设计应该针对这种模式提供自适应的资源配置。</p>
 <p><strong>动态资源分配策略：</strong></p>
 <p>基于计算密度的动态调度可以显著提升NPU利用率：</p>
 <div class="codehilite"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="ss">(</span><span class="nv">Density</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">20</span><span class="ss">)</span><span class="w"> </span>{
@@ -261,6 +334,36 @@ NPU实现要点：</p>
 <li>Concat在channel维度，适合分块处理</li>
 <li>池化操作memory-bound，需要优化内存访问模式</li>
 </ul>
+<p><strong>SPPF的硬件加速策略</strong>：</p>
+<p>串行池化的流水线设计大幅降低了内存占用：</p>
+<div class="codehilite"><pre><span></span><code>Input Feature Map (20×20×1024)
+        │
+        ├─────────────────────────────────┐ (直通)
+        │                                 │
+        ▼                                 │
+   MaxPool_5×5 ──────────────┐           │
+        │                     │           │
+        ▼                     │           │
+   MaxPool_5×5 ────┐         │           │
+        │           │         │           │
+        ▼           ▼         ▼           ▼
+   MaxPool_5×5 → Concat → Concat → Concat → Output
+                                   (20×20×4096)
+
+内存需求对比：
+
+<span class="k">-</span> SPP (并行): 4×20×20×1024×2 = 3.2MB
+<span class="k">-</span> SPPF (串行): 1×20×20×1024×2 = 0.8MB
+<span class="k">-</span> 节省75%片上存储
+</code></pre></div>
+
+<p>每个MaxPool阶段的感受野递增：</p>
+<ul>
+<li>Stage 1: 5×5 感受野</li>
+<li>Stage 2: 9×9 感受野 (5+4)</li>
+<li>Stage 3: 13×13 感受野 (5+4+4)</li>
+</ul>
+<p>这种多尺度设计特别适合检测不同大小的目标，小目标主要响应第一级池化，大目标受益于更大的感受野。</p>
 <h4 id="centernet">CenterNet的中心点检测机制</h4>
 <p>CenterNet代表了目标检测的另一种范式：将检测问题转化为中心点估计问题。这种方法从根本上改变了计算模式，为NPU优化提供了新的机会。与YOLO的密集预测不同，CenterNet专注于稀疏的关键点，这种稀疏性可以被硬件充分利用。</p>
 <p><strong>架构设计的硬件考量：</strong></p>
@@ -270,6 +373,20 @@ NPU实现要点：</p>
 <li><strong>动态计算分配</strong>：根据检测到的峰值数量动态分配计算资源</li>
 <li><strong>早期退出机制</strong>：当检测到足够数量的高置信度目标时提前终止</li>
 </ol>
+<p><strong>稀疏性的量化分析</strong>：</p>
+<p>以640×640输入、下采样率4为例：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">热图尺寸</span><span class="o">:</span><span class="w"> </span><span class="mi">160</span><span class="err">×</span><span class="mi">160</span><span class="err">×</span><span class="mi">80</span><span class="w"> </span><span class="o">(</span><span class="mi">80</span><span class="err">个类别</span><span class="o">)</span>
+<span class="err">总位置数</span><span class="o">:</span><span class="w"> </span><span class="mi">25</span><span class="o">,</span><span class="mi">600</span>
+<span class="err">典型目标数</span><span class="o">:</span><span class="w"> </span><span class="mi">20</span><span class="o">-</span><span class="mi">30</span>
+<span class="err">稀疏度</span><span class="o">:</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">30</span><span class="o">/</span><span class="mi">25600</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">99.88</span><span class="o">%</span>
+
+<span class="err">内存占用对比</span><span class="o">:</span>
+<span class="err">密集表示</span><span class="o">:</span><span class="w"> </span><span class="mi">160</span><span class="err">×</span><span class="mi">160</span><span class="err">×</span><span class="mi">80</span><span class="err">×</span><span class="mi">4</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">8.2</span><span class="n">MB</span><span class="w"> </span><span class="o">(</span><span class="n">fp32</span><span class="o">)</span>
+<span class="err">稀疏表示</span><span class="o">:</span><span class="w"> </span><span class="mi">30</span><span class="err">×</span><span class="o">(</span><span class="mi">2</span><span class="o">+</span><span class="mi">1</span><span class="o">+</span><span class="mi">80</span><span class="err">×</span><span class="mi">4</span><span class="o">)</span><span class="w"> </span><span class="err">≈</span><span class="w"> </span><span class="mi">10</span><span class="n">KB</span>
+<span class="err">压缩率</span><span class="o">:</span><span class="w"> </span><span class="mi">820</span><span class="o">:</span><span class="mi">1</span>
+</code></pre></div>
+
+<p>这种极端的稀疏性使得CenterNet特别适合部署在边缘设备上。通过稀疏编码，整个检测结果可以fit in L2 cache，避免了频繁的DRAM访问。</p>
 <p><strong>核心思想：Objects as Points</strong></p>
 <p>CenterNet将每个目标表示为其边界框的中心点，检测过程分为三步：</p>
 <ol>
@@ -283,6 +400,23 @@ $$Y_{xyc} = \exp\left(-\frac{(x-\tilde{x})^2 + (y-\tilde{y})^2}{2\sigma_p^2}\rig
 其中 $\sigma_p$ 与目标尺寸成正比，确保大目标有更大的响应区域：
 $$\sigma_p = \max\left(1, \frac{1}{3}\sqrt{wh}\right)$$
 这种自适应的标准差设计平衡了定位精度和训练稳定性。</p>
+<p><strong>高斯核的计算优化</strong>：</p>
+<p>实际实现时，高斯核可以预计算并存储为查找表：</p>
+<div class="codehilite"><pre><span></span><code>对于不同尺寸的目标，σ的典型值：
+
+- 行人 (40×100 pixels): σ ≈ 2.1
+- 轿车 (150×300 pixels): σ ≈ 7.9  
+- 卡车 (200×500 pixels): σ ≈ 14.9
+
+预计算策略：
+
+1. 离散化σ为16个等级
+2. 每个等级存储7×7的高斯模板
+3. 总存储: 16×7×7×4 = 3.1KB
+4. 渲染时直接查表，避免exp计算
+</code></pre></div>
+
+<p>这种查表方法将每个高斯核的渲染从49次exp运算降低为49次内存读取，在NPU上可以获得10倍以上的加速。同时，固定大小的模板也便于硬件流水线设计。</p>
 <p><strong>损失函数设计：</strong></p>
 <p>CenterNet使用改进的Focal Loss处理类别不平衡：
 $$L_{\text{heatmap}} = -\frac{1}{N}\sum_{xyc}\begin{cases}
@@ -297,12 +431,36 @@ $$\Delta_x = \tilde{x} - \lfloor\frac{\tilde{x}}{n}\rfloor \times n, \quad \Delt
 $$L_{\text{offset}} = \frac{1}{N}\sum_{i=1}^{N}|\hat{O}_i - O_i|$$
 <strong>计算优势与NPU映射：</strong></p>
 <ol>
-<li>
-<p><strong>无需NMS后处理</strong>：
+<li><strong>无需NMS后处理</strong>：
    - 传统方法：需要串行的NMS操作，难以并行化
    - CenterNet：直接提取local maxima，高度并行
-   - NPU优化：使用3×3 MaxPool实现峰值检测</p>
-</li>
+   - NPU优化：使用3×3 MaxPool实现峰值检测</li>
+</ol>
+<p><strong>峰值检测的并行实现</strong>：</p>
+<div class="codehilite"><pre><span></span><code>Heat Map (160×160×80)
+        │
+        ▼
+MaxPool_3×3 (same padding)
+        │
+        ▼
+Element-wise Compare with Original
+        │
+        ▼
+Threshold (&gt;0.3)
+        │
+        ▼
+Extract Coordinates
+
+并行度分析：
+
+<span class="k">-</span> MaxPool: 完全并行，O(1)时间复杂度
+<span class="k">-</span> Compare: SIMD并行，25,600个位置同时比较
+<span class="k">-</span> Extract: 稀疏gather操作
+
+相比NMS的O(N²)复杂度，提速100倍以上
+</code></pre></div>
+
+<ol start="2">
 <li>
 <p><strong>稀疏激活利用</strong>：
    - 热图典型稀疏度 &gt;99%
@@ -368,6 +526,19 @@ Heatmap   Offset    Size      3D Extension
 <li><strong>批处理友好</strong>：所有pillars可以打包成固定大小的batch，充分利用SIMD/SIMT并行</li>
 <li><strong>数据局部性</strong>：相邻pillars在物理空间上也相邻，有利于缓存预取</li>
 </ul>
+<p><strong>与传统方法的性能对比</strong>：</p>
+<div class="codehilite"><pre><span></span><code>方法对比           PointNet++        PointPillars
+────────────────────────────────────────────────
+输入格式           不规则点集         规则Pillar Grid
+内存访问模式       随机访问          顺序访问
+并行化难度         高(FPS/采样)      低(规则tensor)
+硬件利用率         ~30%             ~85%
+推理延迟(ms)       67               16
+内存带宽需求       不可预测          可精确计算
+缓存命中率         &lt;40%             &gt;90%
+</code></pre></div>
+
+<p>这种从不规则到规则的转换是深度学习系统设计的经典范式：通过引入少量的信息损失（pillar内点的顺序信息），换取数量级的性能提升。</p>
 <p><strong>点云预处理流程：</strong></p>
 <ol>
 <li>
@@ -395,6 +566,29 @@ Heatmap   Offset    Size      3D Extension
 <li>动态N vs固定N：固定N=100简化硬件设计，但可能浪费计算资源</li>
 <li>实践中，95%的pillars包含&lt;30个点，可考虑分级处理</li>
 </ul>
+<p><strong>Pillar密度的统计分布</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">距离范围</span><span class="w">     </span><span class="nt">平均点数</span><span class="o">/</span><span class="nt">pillar</span><span class="w">   </span><span class="nt">稀疏度</span><span class="w">    </span><span class="nt">优化策略</span>
+<span class="err">─────────────────────────────────────────────</span>
+<span class="nt">0-10m</span><span class="w">       </span><span class="nt">45</span><span class="p">.</span><span class="nc">2</span><span class="w">            </span><span class="nt">5</span><span class="o">%</span><span class="w">       </span><span class="nt">完整处理</span>
+<span class="nt">10-20m</span><span class="w">      </span><span class="nt">18</span><span class="p">.</span><span class="nc">7</span><span class="w">            </span><span class="nt">15</span><span class="o">%</span><span class="w">      </span><span class="nt">标准处理</span>
+<span class="nt">20-40m</span><span class="w">      </span><span class="nt">5</span><span class="p">.</span><span class="nc">3</span><span class="w">             </span><span class="nt">60</span><span class="o">%</span><span class="w">      </span><span class="nt">稀疏处理</span>
+<span class="nt">40-60m</span><span class="w">      </span><span class="nt">1</span><span class="p">.</span><span class="nc">8</span><span class="w">             </span><span class="nt">85</span><span class="o">%</span><span class="w">      </span><span class="nt">极稀疏处理</span>
+<span class="nt">60m</span><span class="o">+</span><span class="w">        </span><span class="nt">0</span><span class="p">.</span><span class="nc">4</span><span class="w">             </span><span class="nt">95</span><span class="o">%</span><span class="w">      </span><span class="nt">跳过或简化</span>
+
+<span class="nt">分级处理策略</span><span class="o">:</span>
+<span class="nt">if</span><span class="w"> </span><span class="o">(</span><span class="nt">distance</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="nt">20m</span><span class="o">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">N_max</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">100</span><span class="p">;</span><span class="w">  </span><span class="err">//</span><span class="w"> </span><span class="err">完整容量</span>
+<span class="w">    </span><span class="err">use_full_pointnet()</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="nt">else</span><span class="w"> </span><span class="nt">if</span><span class="w"> </span><span class="o">(</span><span class="nt">distance</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="nt">40m</span><span class="o">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">N_max</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">32</span><span class="p">;</span><span class="w">   </span><span class="err">//</span><span class="w"> </span><span class="err">降低容量</span>
+<span class="w">    </span><span class="err">use_lite_pointnet()</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="nt">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="err">N_max</span><span class="w"> </span><span class="err">=</span><span class="w"> </span><span class="err">8</span><span class="p">;</span><span class="w">    </span><span class="err">//</span><span class="w"> </span><span class="err">最小容量</span>
+<span class="w">    </span><span class="err">use_micro_pointnet()</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>这种自适应处理可以节省70%的PointNet计算量，同时保持检测精度。</p>
 <p><strong>增强的Pillar特征编码：</strong></p>
 <p>每个点的9维特征向量：
 $$f_{i} = [x_i, y_i, z_i, r_i, x_i - x_c, y_i - y_c, z_i - z_c, x_i - x_p, y_i - y_p]$$
@@ -425,6 +619,25 @@ $$\text{Sparsity} = 1 - \frac{N_{\text{non-empty}}}{N_{\text{total}}} \approx 0.
 <li>中距离（20-40m）：稀疏度 ~90%</li>
 <li>远距离（&gt;40m）：稀疏度 &gt;95%</li>
 </ul>
+<p><strong>稀疏性的物理意义与利用</strong>：</p>
+<p>激光雷达点云的稀疏性来源于两个物理因素：</p>
+<ol>
+<li><strong>角分辨率固定</strong>：64线激光雷达坐0.1°角分辨率下，远距离点间距增大</li>
+<li><strong>遮挡效应</strong>：大部分区域被地面、建筑物遮挡，无有效反射</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>点云密度分布图 (俯视图)
+
+     近距离区域                中距离区域              远距离区域
+   ┌───────────┐           ┌───────────┐         ┌───────────┐
+   │███████████│           │░░░█░░█░░░░│         │····█······│
+   │███████████│           │░████████░░│         │··█████····│
+   │████ ██████│           │░░░█░░█░░░░│         │···█··█····│
+   └───────────┘           └───────────┘         └───────────┘
+  ~5000 pts/m²             ~500 pts/m²            ~50 pts/m²
+  30% 空白pillars          90% 空白pillars        95% 空白pillars
+</code></pre></div>
+
+<p>这种稀疏性分布启发了分层处理策略：近距离区域使用密集计算获得高精度，远距离区域使用稀疏计算节省资源。这种策略与人类视觉系统的中央凹（fovea）设计类似。</p>
 <p><strong>NPU优化策略：</strong></p>
 <ol>
 <li><strong>动态批处理</strong>：</li>
@@ -435,417 +648,588 @@ scatter_to_bev(batched_features, indices)
 </code></pre></div>
 
 <p>仅处理非空pillars，计算量降低90%+</p>
-<ol start="2">
-<li>
-<p><strong>稀疏卷积实现</strong>：
-   - 使用CSR格式存储稀疏特征图
-   - Rulebook生成：预计算卷积核的有效位置
-   - Gather-GEMM-Scatter模式执行</p>
-</li>
-<li>
-<p><strong>混合精度策略</strong>：
-   - PointNet层：FP16（特征提取）
-   - BEV backbone：INT8（2D卷积）
-   - Detection head：FP16（精确定位）</p>
-</li>
-</ol>
-<h4 id="centerpoint">CenterPoint的多尺度特征聚合</h4>
-<p>CenterPoint将CenterNet的思想扩展到3D空间，通过在BEV视角下检测目标中心实现高效的3D检测。其核心创新在于使用3D稀疏卷积处理体素化点云，然后在BEV空间进行中心点检测。</p>
-<p><strong>三阶段处理流程：</strong></p>
-<div class="codehilite"><pre><span></span><code>    Raw Points (~100K points)
-        ↓
-    [Stage 1: Voxelization]
-    Voxel Grid (40000×1600×40)
-        ↓
-    [Stage 2: 3D Sparse CNN]
-    3D Features → BEV Compression
-        ↓
-    [Stage 3: 2D Detection]
-    Center Heatmap + 3D Attributes
+<p><strong>硬件实现细节</strong>：
+   ```
+   Pillar批处理流水线:</p>
+<p>Stage 1: Index Generation (索引生成)
+   │
+   ├──► 遍历所有pillars
+   ├──► 统计点数 &gt; 0的pillars
+   └──► 生成active_mask</p>
+<p>Stage 2: Data Gathering (数据收集)
+   │
+   ├──► 根据active_mask收集点云
+   ├──► 打包成固定batch (e.g., 12000 pillars)
+   └──► 填充到N=100或截断</p>
+<p>Stage 3: PointNet Processing (特征提取)
+   │
+   ├──► Linear(9 → 64) + BN + ReLU
+   ├──► Linear(64 → 128) + BN + ReLU<br />
+   └──► MaxPool over points → (12000, 128)</p>
+<p>Stage 4: Scatter Back (分散回写)
+   │
+   └──► 根据原始位置写回BEV grid</p>
+<p>内存带宽需求:</p>
+<ul>
+<li>Gather: 12000 × 100 × 9 × 4B = 43.2MB</li>
+<li>Process: 在片上SRAM中完成</li>
+<li>Scatter: 12000 × 128 × 4B = 6.1MB</li>
+<li>总计: 49.3MB (原始密集: 940×940×128×4B = 451MB)</li>
+</ul>
+<div class="codehilite"><pre><span></span><code><span class="mf">2.</span><span class="w"> </span><span class="o">**</span><span class="n">稀疏卷积实现</span><span class="o">**</span><span class="err">：</span>
+<span class="o">-</span><span class="w"> </span><span class="n">使用CSR格式存储稀疏特征图</span>
+<span class="o">-</span><span class="w"> </span><span class="n">Rulebook生成</span><span class="err">：</span><span class="n">预计算卷积核的有效位置</span>
+<span class="o">-</span><span class="w"> </span><span class="n">Gather</span><span class="o">-</span><span class="n">GEMM</span><span class="o">-</span><span class="n">Scatter模式执行</span>
+
+<span class="mf">3.</span><span class="w"> </span><span class="o">**</span><span class="n">混合精度策略</span><span class="o">**</span><span class="err">：</span>
+<span class="o">-</span><span class="w"> </span><span class="n">PointNet层</span><span class="err">：</span><span class="n">FP16</span><span class="err">（</span><span class="n">特征提取</span><span class="err">）</span>
+<span class="o">-</span><span class="w"> </span><span class="n">BEV</span><span class="w"> </span><span class="n">backbone</span><span class="err">：</span><span class="nb">INT</span><span class="mf">8</span><span class="err">（</span><span class="mf">2</span><span class="n">D卷积</span><span class="err">）</span>
+<span class="o">-</span><span class="w"> </span><span class="n">Detection</span><span class="w"> </span><span class="n">head</span><span class="err">：</span><span class="n">FP16</span><span class="err">（</span><span class="n">精确定位</span><span class="err">）</span>
+
+<span class="err">####</span><span class="w"> </span><span class="n">CenterPoint的多尺度特征聚合</span>
+
+<span class="n">CenterPoint将CenterNet的思想扩展到3D空间</span><span class="err">，</span><span class="n">通过在BEV视角下检测目标中心实现高效的3D检测</span><span class="err">。</span><span class="n">其核心创新在于使用3D稀疏卷积处理体素化点云</span><span class="err">，</span><span class="n">然后在BEV空间进行中心点检测</span><span class="err">。</span>
+
+<span class="o">**</span><span class="n">三阶段处理流程</span><span class="err">：</span><span class="o">**</span>
 </code></pre></div>
 
-<p><strong>体素化与3D稀疏卷积：</strong></p>
-<ol>
-<li><strong>动态体素化</strong>：
-$$V_{ijk} = \{p | \lfloor\frac{p_x}{\Delta_x}\rfloor=i, \lfloor\frac{p_y}{\Delta_y}\rfloor=j, \lfloor\frac{p_z}{\Delta_z}\rfloor=k\}$$
-典型参数：</li>
-</ol>
+<div class="codehilite"><pre><span></span><code>Raw Points (~100K points)
+    ↓
+[Stage 1: Voxelization]
+Voxel Grid (40000×1600×40)
+    ↓
+[Stage 2: 3D Sparse CNN]
+3D Features → BEV Compression
+    ↓
+[Stage 3: 2D Detection]
+Center Heatmap + 3D Attributes
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="o">**</span>体素化与<span class="mi">3</span><span class="nv">D稀疏卷积</span>：<span class="o">**</span>
+
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="o">**</span>动态体素化<span class="o">**</span>：
+<span class="p">$$</span><span class="nv">V</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">ijk</span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\\<span class="p">{</span><span class="nv">p</span><span class="w"> </span><span class="o">|</span><span class="w"> </span>\<span class="nv">lfloor</span>\<span class="nv">frac</span><span class="p">{</span><span class="nv">p</span>\<span class="nv">_x</span><span class="p">}{</span>\<span class="nv">Delta</span>\<span class="nv">_x</span><span class="p">}</span>\<span class="nv">rfloor</span><span class="o">=</span><span class="nv">i</span><span class="p">,</span><span class="w"> </span>\<span class="nv">lfloor</span>\<span class="nv">frac</span><span class="p">{</span><span class="nv">p</span>\<span class="nv">_y</span><span class="p">}{</span>\<span class="nv">Delta</span>\<span class="nv">_y</span><span class="p">}</span>\<span class="nv">rfloor</span><span class="o">=</span><span class="nv">j</span><span class="p">,</span><span class="w"> </span>\<span class="nv">lfloor</span>\<span class="nv">frac</span><span class="p">{</span><span class="nv">p</span>\<span class="nv">_z</span><span class="p">}{</span>\<span class="nv">Delta</span>\<span class="nv">_z</span><span class="p">}</span>\<span class="nv">rfloor</span><span class="o">=</span><span class="nv">k</span>\\<span class="p">}$$</span>
+典型参数：
+
+<span class="w">   </span><span class="o">-</span><span class="w"> </span>体素大小：<span class="p">$[</span><span class="mf">0.075</span><span class="p">,</span><span class="w"> </span><span class="mf">0.075</span><span class="p">,</span><span class="w"> </span><span class="mf">0.2</span><span class="p">]</span><span class="nv">m</span><span class="p">$</span>
+<span class="w">   </span><span class="o">-</span><span class="w"> </span>范围：<span class="p">$[</span><span class="o">-</span><span class="mi">54</span><span class="p">,</span><span class="w"> </span><span class="mi">54</span><span class="p">]</span><span class="nv">m</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="p">[</span><span class="o">-</span><span class="mi">54</span><span class="p">,</span><span class="w"> </span><span class="mi">54</span><span class="p">]</span><span class="nv">m</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="p">[</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">]</span><span class="nv">m</span><span class="p">$</span>
+<span class="w">   </span><span class="o">-</span><span class="w"> </span>体素网格：<span class="p">$</span><span class="mi">1440</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">1440</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">40</span><span class="p">$</span>
+
+<span class="w">   </span><span class="o">**</span>体素大小的权衡<span class="o">**</span>：
+</code></pre></div>
+
+<p>参数选择对性能的影响:</p>
+<p>体素尺寸    体素总数      稀疏度    精度    计算量
+─────────────────────────────────────────────
+0.05m      3.2×10⁸       99.5%   高      极高
+0.075m     8.3×10⁷       98.8%   中高    高      ← 选择
+0.1m       3.7×10⁷       97.5%   中      中
+0.15m      1.1×10⁷       95.0%   低      低</p>
+<p>0.075m的选择理由:</p>
 <ul>
-<li>体素大小：$[0.075, 0.075, 0.2]m$</li>
-<li>范围：$[-54, 54]m \times [-54, 54]m \times [-5, 3]m$</li>
-<li>体素网格：$1440 \times 1440 \times 40$</li>
+<li>匹配64线激光雷达在0.2°垂直分辨率</li>
+<li>在10m处约有3.5cm的点间距</li>
+<li>平衡精度和计算效率</li>
 </ul>
-<ol start="2">
-<li><strong>3D稀疏卷积网络</strong>：</li>
-</ol>
-<div class="codehilite"><pre><span></span><code>SubMConv3d(16) → SubMConv3d(16)
+<div class="codehilite"><pre><span></span><code><span class="mf">2.</span><span class="w"> </span><span class="o">**</span><span class="mf">3</span><span class="n">D稀疏卷积网络</span><span class="o">**</span><span class="err">：</span>
+</code></pre></div>
+
+<p>SubMConv3d(16) → SubMConv3d(16)
        ↓
 SparseConv3d(32, stride=2) → SubMConv3d(32) × 2
        ↓
 SparseConv3d(64, stride=2) → SubMConv3d(64) × 2
        ↓
-SparseConv3d(128, stride=2) → SubMConv3d(128) × 2
+SparseConv3d(128, stride=2) → SubMConv3d(128) × 2</p>
+<div class="codehilite"><pre><span></span><code><span class="w">   </span><span class="nv">SubMConv3d保持稀疏性</span>，<span class="nv">SparseConv3d允许稀疏性变化</span>。
+
+<span class="o">**</span>稀疏卷积的高效实现：<span class="o">**</span>
+
+传统密集<span class="mi">3</span><span class="nv">D卷积的计算复杂度</span>：
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">FLOPs</span><span class="p">}</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">dense</span><span class="p">}}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">K</span><span class="o">^</span><span class="mi">3</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">C</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">in</span><span class="p">}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">C</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">out</span><span class="p">}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">D</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">W</span><span class="p">$$</span>
+稀疏卷积通过<span class="nv">Rulebook优化</span>：
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">FLOPs</span><span class="p">}</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">sparse</span><span class="p">}}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{(</span><span class="nv">i</span><span class="p">,</span><span class="nv">o</span><span class="p">)</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Rulebook</span><span class="p">}}</span><span class="w"> </span><span class="nv">K</span><span class="o">^</span><span class="mi">3</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">C</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">in</span><span class="p">}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">C</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">out</span><span class="p">}$$</span>
+实际加速比：
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Speedup</span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">frac</span><span class="p">{</span><span class="mi">1</span><span class="p">}{(</span><span class="mi">1</span><span class="o">-</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Sparsity</span><span class="p">})</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span>\<span class="nv">alpha</span><span class="p">}$$</span>
+其中<span class="w"> </span><span class="p">$</span>\<span class="nv">alpha</span><span class="w"> </span>\<span class="nv">approx</span><span class="w"> </span><span class="mf">1.2</span><span class="p">$</span><span class="w"> </span>为索引开销系数。对于<span class="mi">95</span><span class="nv">%稀疏度</span>：
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Speedup</span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">frac</span><span class="p">{</span><span class="mi">1</span><span class="p">}{</span><span class="mf">0.05</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mf">1.2</span><span class="p">}</span><span class="w"> </span>\<span class="nv">approx</span><span class="w"> </span><span class="mi">333</span>×<span class="p">$$</span>
+<span class="o">**</span><span class="nv">Rulebook生成算法</span><span class="o">**</span>：
 </code></pre></div>
 
-<p>SubMConv3d保持稀疏性，SparseConv3d允许稀疏性变化。</p>
-<p><strong>稀疏卷积的高效实现：</strong></p>
-<p>传统密集3D卷积的计算复杂度：
-$$\text{FLOPs}_{\text{dense}} = K^3 \times C_{in} \times C_{out} \times D \times H \times W$$
-稀疏卷积通过Rulebook优化：
-$$\text{FLOPs}_{\text{sparse}} = \sum_{(i,o) \in \text{Rulebook}} K^3 \times C_{in} \times C_{out}$$
-实际加速比：
-$$\text{Speedup} = \frac{1}{(1-\text{Sparsity})^2 \times \alpha}$$
-其中 $\alpha \approx 1.2$ 为索引开销系数。对于95%稀疏度：
-$$\text{Speedup} = \frac{1}{0.05^2 \times 1.2} \approx 333×$$
-<strong>BEV特征压缩：</strong></p>
-<p>将3D特征压缩到BEV平面：
-$$F_{\text{BEV}}(x,y) = \text{Concat}_{z}[F_{3D}(x,y,z)]$$
+<p>Rulebook是稀疏卷积的核心数据结构，记录了每个卷积核位置的输入输出映射：</p>
+<p>传统3D卷积 (3×3×3 kernel):
+for each output_voxel (x,y,z):
+    for kx in [-1,0,1]:
+        for ky in [-1,0,1]:
+            for kz in [-1,0,1]:
+                input_voxel = (x+kx, y+ky, z+kz)
+                if exists(input_voxel):
+                    compute MAC</p>
+<p>Submanifold稀疏卷积 (SubMConv3d):</p>
+<ul>
+<li>输出仅在输入非空位置产生</li>
+<li>保持稀疏模式不变</li>
+<li>适用于残差块</li>
+</ul>
+<p>Rulebook结构:
+[
+  (input_idx, output_idx, kernel_offset),
+  (12, 45, 13),  // voxel_12 → voxel_45, kernel[1,1,3]
+  (13, 45, 14),  // voxel_13 → voxel_45, kernel[1,1,4]
+  ...
+]</p>
+<p>实际执行:</p>
+<ol>
+<li>根据Rulebook gather输入特征</li>
+<li>执行GEMM: [N_pairs, C_in] × [C_in, C_out]</li>
+<li>Scatter回输出位置</li>
+</ol>
+<div class="codehilite"><pre><span></span><code>这种方法将不规则的<span class="mi">3</span><span class="nv">D卷积转化为规则的GEMM操作</span>，非常适合脉动阵列加速。
+
+<span class="o">**</span><span class="nv">BEV特征压缩</span>：<span class="o">**</span>
+
+将<span class="mi">3</span><span class="nv">D特征压缩到BEV平面</span>：
+<span class="p">$$</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}}(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Concat</span><span class="p">}</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">z</span><span class="p">}[</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span><span class="mi">3</span><span class="nv">D</span><span class="p">}(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">,</span><span class="nv">z</span><span class="p">)]$$</span>
 或使用加权聚合：
-$$F_{\text{BEV}}(x,y) = \sum_{z} w_z \cdot F_{3D}(x,y,z)$$
-<strong>多任务检测头：</strong></p>
-<p>CenterPoint的检测头预测多个任务：</p>
+<span class="p">$$</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}}(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">z</span><span class="p">}</span><span class="w"> </span><span class="nv">w</span>\<span class="nv">_z</span><span class="w"> </span>\<span class="nv">cdot</span><span class="w"> </span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span><span class="mi">3</span><span class="nv">D</span><span class="p">}(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">,</span><span class="nv">z</span><span class="p">)$$</span>
+<span class="o">**</span>多任务检测头：<span class="o">**</span>
+
+<span class="nv">CenterPoint的检测头预测多个任务</span>：
+
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="o">**</span>中心热图<span class="o">**</span>：<span class="p">$</span><span class="nv">H</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">W</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">K</span><span class="p">}$</span>（<span class="nv">K个类别</span>）
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="o">**</span>中心偏移<span class="o">**</span>：<span class="p">$</span><span class="nv">O</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">W</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">2</span><span class="p">}$</span>（亚像素精度）
+<span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="o">**</span><span class="mi">3</span><span class="nv">D尺寸</span><span class="o">**</span>：<span class="p">$</span><span class="nv">S</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">W</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">3</span><span class="p">}$</span>（长宽高）
+<span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="o">**</span>旋转角度<span class="o">**</span>：<span class="p">$</span><span class="nv">R</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">W</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">2</span><span class="p">}$</span>（<span class="nv">sin</span><span class="p">,</span><span class="w"> </span><span class="nv">cos编码</span>）
+<span class="mi">5</span><span class="o">.</span><span class="w"> </span><span class="o">**</span>速度估计<span class="o">**</span>：<span class="p">$</span><span class="nv">V</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">W</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">H</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="mi">2</span><span class="p">}$</span>（可选，用于跟踪）
+
+<span class="o">**</span>两阶段精炼（可选）：<span class="o">**</span>
+
+第二阶段使用<span class="nv">RoI特征精炼预测</span>：
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">RoI</span><span class="w"> </span><span class="nv">Features</span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">RoIAlign</span><span class="p">}(</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}},</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Proposals</span><span class="p">})$$</span>
+<span class="p">$$</span>\<span class="nv">Delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">MLP</span><span class="p">}(</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">RoI</span><span class="w"> </span><span class="nv">Features</span><span class="p">})$$</span>
+精炼带来~<span class="mi">2</span><span class="o">-</span><span class="mi">3</span><span class="nv">%</span><span class="w"> </span><span class="nv">AP提升</span>，但增加<span class="mi">20</span><span class="nv">%延迟</span>。
+
+<span class="o">**</span>计算复杂度分析：<span class="o">**</span>
+
+<span class="o">|</span><span class="w"> </span>组件<span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="nv">FLOPs</span><span class="w"> </span><span class="o">|</span><span class="w"> </span>占比<span class="w"> </span><span class="o">|</span>
+
+<span class="o">|</span><span class="w"> </span>组件<span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="nv">FLOPs</span><span class="w"> </span><span class="o">|</span><span class="w"> </span>占比<span class="w"> </span><span class="o">|</span>
+<span class="o">|------|-------|------|</span>
+<span class="o">|</span><span class="w"> </span><span class="mi">3</span><span class="nv">D</span><span class="w"> </span><span class="nv">Sparse</span><span class="w"> </span><span class="nv">CNN</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mf">5.2</span><span class="nv">G</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mi">45</span><span class="nv">%</span><span class="w"> </span><span class="o">|</span>
+<span class="o">|</span><span class="w"> </span><span class="nv">BEV</span><span class="w"> </span><span class="nv">Backbone</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mf">4.8</span><span class="nv">G</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mi">42</span><span class="nv">%</span><span class="w"> </span><span class="o">|</span>
+<span class="o">|</span><span class="w"> </span><span class="nv">Detection</span><span class="w"> </span><span class="nv">Heads</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mf">1.5</span><span class="nv">G</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mi">13</span><span class="nv">%</span><span class="w"> </span><span class="o">|</span>
+<span class="o">|</span><span class="w"> </span>总计<span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mf">11.5</span><span class="nv">G</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mi">100</span><span class="nv">%</span><span class="w"> </span><span class="o">|</span>
+
+相比<span class="nv">PointPillars</span>（~<span class="mi">63</span><span class="nv">G</span>），<span class="nv">CenterPoint通过稀疏卷积实现5</span>×加速。
+
+<span class="o">###</span><span class="w"> </span><span class="mf">2.1</span><span class="o">.</span><span class="mi">3</span><span class="w"> </span><span class="nv">BEV感知网络</span>：<span class="nv">BEVFormer与BEVDet</span>
+
+<span class="o">####</span><span class="w"> </span><span class="nv">BEVFormer的时空注意力机制</span>
+
+<span class="nv">BEVFormer通过可学习的BEV</span><span class="w"> </span><span class="nv">queries与多视角图像特征交互</span>，实现<span class="mi">2</span><span class="nv">D到3D的特征转换</span>。
+
+<span class="o">**</span>空间交叉注意力（<span class="nv">SCA</span>）：<span class="o">**</span>
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">SCA</span><span class="p">}(</span><span class="nv">Q</span>\<span class="nv">_p</span><span class="p">,</span><span class="w"> </span><span class="nv">F</span>\<span class="nv">_t</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">i</span><span class="o">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">ref</span><span class="p">}}}</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">DeformAttn</span><span class="p">}(</span><span class="nv">Q</span>\<span class="nv">_p</span><span class="p">,</span><span class="w"> </span><span class="nf">P</span><span class="p">(</span><span class="nv">p</span><span class="p">,</span><span class="w"> </span><span class="nv">i</span><span class="p">,</span><span class="w"> </span><span class="nv">j</span><span class="p">),</span><span class="w"> </span><span class="nv">F</span>\<span class="nv">_t</span><span class="o">^</span><span class="nv">i</span><span class="p">)$$</span>
+其中：
+
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nv">Q</span>\<span class="nv">_p</span><span class="p">$</span><span class="o">:</span><span class="w"> </span><span class="nv">BEV位置</span><span class="w"> </span><span class="p">$</span><span class="nv">p</span><span class="p">$</span><span class="w"> </span>的<span class="nv">query</span>
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nv">F</span>\<span class="nv">_t</span><span class="o">^</span><span class="nv">i</span><span class="p">$</span><span class="o">:</span><span class="w"> </span>第<span class="w"> </span><span class="p">$</span><span class="nv">i</span><span class="p">$</span><span class="w"> </span>个相机在时刻<span class="w"> </span><span class="p">$</span><span class="nv">t</span><span class="p">$</span><span class="w"> </span>的特征
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nf">P</span><span class="p">(</span><span class="nv">p</span><span class="p">,</span><span class="w"> </span><span class="nv">i</span><span class="p">,</span><span class="w"> </span><span class="nv">j</span><span class="p">)$</span><span class="o">:</span><span class="w"> </span><span class="mi">3</span><span class="nv">D到2D的投影函数</span>
+
+<span class="o">**</span>时序自注意力（<span class="nv">TSA</span>）：<span class="o">**</span>
+<span class="p">$$</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">TSA</span><span class="p">}(</span><span class="nv">Q</span>\<span class="nv">_t</span><span class="p">,</span><span class="w"> </span><span class="nv">B</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">t</span><span class="o">-</span><span class="mi">1</span><span class="p">})</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">DeformAttn</span><span class="p">}(</span><span class="nv">Q</span>\<span class="nv">_t</span><span class="p">,</span><span class="w"> </span><span class="nv">Q</span>\<span class="nv">_t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span>\<span class="nv">Delta</span><span class="p">,</span><span class="w"> </span><span class="nv">B</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">t</span><span class="o">-</span><span class="mi">1</span><span class="p">})$$</span>
+这里<span class="w"> </span><span class="p">$</span>\<span class="nv">Delta</span><span class="p">$</span><span class="w"> </span>编码了自车运动补偿。
+
+<span class="o">**</span>计算开销分解：<span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nv">SCA</span><span class="o">:</span><span class="w"> </span><span class="p">$</span><span class="nf">O</span><span class="p">(</span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">cam</span><span class="p">}}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">ref</span><span class="p">}}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">D</span><span class="o">^</span><span class="mi">2</span><span class="p">)$</span>
+<span class="o">-</span><span class="w"> </span><span class="nv">TSA</span><span class="o">:</span><span class="w"> </span><span class="p">$</span><span class="nf">O</span><span class="p">(</span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">temporal</span><span class="p">}}</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">D</span><span class="o">^</span><span class="mi">2</span><span class="p">)$</span>
+<span class="o">-</span><span class="w"> </span>总计<span class="o">:</span><span class="w"> </span>约<span class="mi">30</span><span class="w"> </span><span class="nv">GFLOPs用于6相机输入</span>
+
+<span class="o">####</span><span class="w"> </span><span class="nv">BEVDet的深度估计策略</span>
+
+<span class="nv">BEVDet通过显式深度估计构建BEV特征</span>：
+
+<span class="o">**</span>深度分布预测：<span class="o">**</span>
+<span class="p">$$</span><span class="nf">D</span><span class="p">(</span><span class="nv">u</span><span class="p">,</span><span class="nv">v</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Softmax</span><span class="p">}(</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">Conv</span><span class="p">}(</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span><span class="mi">2</span><span class="nv">D</span><span class="p">}(</span><span class="nv">u</span><span class="p">,</span><span class="nv">v</span><span class="p">)))</span><span class="w"> </span>\<span class="nv">in</span><span class="w"> </span>\<span class="nv">mathbb</span><span class="p">{</span><span class="nv">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">D</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">bins</span><span class="p">}}}$$</span>
+<span class="o">**</span><span class="nv">Lift</span><span class="o">-</span><span class="nv">Splat变换</span>：<span class="o">**</span>
+<span class="p">$$</span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">BEV</span><span class="p">}}(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">c</span><span class="o">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">N</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">cam</span><span class="p">}}}</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">d</span><span class="o">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">D</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">bins</span><span class="p">}}}</span><span class="w"> </span><span class="nv">F</span>\<span class="nv">_</span><span class="p">{</span><span class="mi">2</span><span class="nv">D</span><span class="p">}</span><span class="o">^</span><span class="nf">c</span><span class="p">(</span>\<span class="nv">pi</span>\<span class="nf">_c</span><span class="p">(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">,</span><span class="nv">d</span><span class="p">))</span><span class="w"> </span>\<span class="nv">times</span><span class="w"> </span><span class="nv">D</span><span class="o">^</span><span class="nf">c</span><span class="p">(</span>\<span class="nv">pi</span>\<span class="nf">_c</span><span class="p">(</span><span class="nv">x</span><span class="p">,</span><span class="nv">y</span><span class="p">,</span><span class="nv">d</span><span class="p">))$$</span>
+其中<span class="w"> </span><span class="p">$</span>\<span class="nv">pi</span>\<span class="nv">_c</span><span class="p">$</span><span class="w"> </span>为相机<span class="w"> </span><span class="p">$</span><span class="nv">c</span><span class="p">$</span><span class="w"> </span>的投影矩阵。
+
+<span class="o">###</span><span class="w"> </span><span class="mf">2.1</span><span class="o">.</span><span class="mi">4</span><span class="w"> </span>轨迹预测与规划网络
+
+<span class="o">####</span><span class="w"> </span>基于<span class="nv">Transformer的轨迹预测</span>
+
+现代轨迹预测网络（如<span class="nv">Wayformer</span>）采用场景中心（<span class="nv">scene</span><span class="o">-</span><span class="nv">centric</span>）表示：
+
+<span class="o">**</span>场景表示的演进<span class="o">**</span>：
+
+从早期的独立轨迹预测到现代的交互式预测，架构设计经历了根本性变革：
+</code></pre></div>
+
+<p>第一代: 独立预测 (2015-2018)
+┌─────────────────────────┐
+│ LSTM/GRU 单独处理每个Agent │
+│ 无交互建模                 │
+│ O(N) 复杂度                  │
+└─────────────────────────┘
+            ↓
+第二代: 图网络交互 (2018-2020)
+┌─────────────────────────┐
+│ GNN/GraphRNN 建模Agent间关系│
+│ 有限交互范围                │
+│ O(N×E) 复杂度               │
+└─────────────────────────┘
+            ↓
+第三代: Transformer全局交互 (2020-)
+┌─────────────────────────┐
+│ Self-Attention 全局交互    │
+│ 地图信息融合                 │
+│ O(N²) 但更准确              │
+└─────────────────────────┘</p>
+<div class="codehilite"><pre><span></span><code><span class="nv">Transformer架构在轨迹预测中的优势在于其能够捕捉复杂的多体交互模式</span>，特别是在交叉路口、并线等高交互场景。
+
+<span class="o">**</span><span class="nv">Agent</span><span class="o">-</span><span class="nv">Scene交互建模</span>：<span class="o">**</span>
+<span class="p">$$</span><span class="nv">h</span>\<span class="nv">_i</span><span class="o">^</span><span class="p">{(</span><span class="nv">l</span><span class="o">+</span><span class="mi">1</span><span class="p">)}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">h</span>\<span class="nv">_i</span><span class="o">^</span><span class="p">{(</span><span class="nv">l</span><span class="p">)}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span>\<span class="nv">text</span><span class="p">{</span><span class="nv">MHA</span><span class="p">}([</span><span class="nv">h</span>\<span class="nv">_i</span><span class="o">^</span><span class="p">{(</span><span class="nv">l</span><span class="p">)},</span><span class="w"> </span><span class="nv">E</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">pos</span><span class="p">}}</span><span class="o">^</span><span class="nv">i</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="nv">H</span><span class="o">^</span><span class="p">{(</span><span class="nv">l</span><span class="p">)},</span><span class="w"> </span><span class="nv">E</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">pos</span><span class="p">}}])$$</span>
+其中：
+
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nv">h</span>\<span class="nv">_i</span><span class="p">$</span><span class="o">:</span><span class="w"> </span><span class="nv">agent</span><span class="w"> </span><span class="p">$</span><span class="nv">i</span><span class="p">$</span><span class="w"> </span>的隐状态
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nv">E</span>\<span class="nv">_</span><span class="p">{</span>\<span class="nv">text</span><span class="p">{</span><span class="nv">pos</span><span class="p">}}$</span><span class="o">:</span><span class="w"> </span>位置编码
+<span class="o">-</span><span class="w"> </span><span class="p">$</span><span class="nv">H</span><span class="p">$</span><span class="o">:</span><span class="w"> </span>所有<span class="nv">agents和地图元素的特征集合</span>
+
+<span class="o">**</span>多模态轨迹生成：<span class="o">**</span>
+<span class="p">$$</span><span class="nf">P</span><span class="p">(</span><span class="nv">Y</span><span class="o">|</span><span class="nv">X</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>\<span class="nv">sum</span>\<span class="nv">_</span><span class="p">{</span><span class="nv">k</span><span class="o">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nv">K</span><span class="p">}</span><span class="w"> </span><span class="nv">w</span>\<span class="nv">_k</span><span class="w"> </span>\<span class="nv">cdot</span><span class="w"> </span>\<span class="nv">mathcal</span><span class="p">{</span><span class="nv">N</span><span class="p">}(</span>\<span class="nv">mu</span>\<span class="nf">_k</span><span class="p">(</span><span class="nv">X</span><span class="p">),</span><span class="w"> </span>\<span class="nv">Sigma</span>\<span class="nf">_k</span><span class="p">(</span><span class="nv">X</span><span class="p">))$$</span>
+典型设置<span class="w"> </span><span class="p">$</span><span class="nv">K</span><span class="o">=</span><span class="mi">6</span><span class="p">$</span><span class="w"> </span>个模态，每个模态预测<span class="w"> </span><span class="p">$</span><span class="nv">T</span><span class="o">=</span><span class="mi">80</span><span class="p">$</span><span class="w"> </span>个时间步（<span class="mi">8</span>秒）。
+
+<span class="o">**</span>多模态的物理意义<span class="o">**</span>：
+
+不同模态对应不同的驾驶意图：
+</code></pre></div>
+
+<p>6种典型驾驶模态:</p>
 <ol>
-<li><strong>中心热图</strong>：$H \in \mathbb{R}^{W \times H \times K}$（K个类别）</li>
-<li><strong>中心偏移</strong>：$O \in \mathbb{R}^{W \times H \times 2}$（亚像素精度）</li>
-<li><strong>3D尺寸</strong>：$S \in \mathbb{R}^{W \times H \times 3}$（长宽高）</li>
-<li><strong>旋转角度</strong>：$R \in \mathbb{R}^{W \times H \times 2}$（sin, cos编码）</li>
-<li><strong>速度估计</strong>：$V \in \mathbb{R}^{W \times H \times 2}$（可选，用于跟踪）</li>
+<li>直行保持 (33%) - 继续当前车道</li>
+<li>左转待行 (15%) - 等待对向车流</li>
+<li>左转通过 (12%) - 立即左转</li>
+<li>右转让行 (10%) - 避让行人</li>
+<li>变道左 (8%)   - 超车或避障</li>
+<li>变道右 (7%)   - 回到慢车道
+其他 (15%)      - 停车、掉头等</li>
 </ol>
-<p><strong>两阶段精炼（可选）：</strong></p>
-<p>第二阶段使用RoI特征精炼预测：
-$$\text{RoI Features} = \text{RoIAlign}(F_{\text{BEV}}, \text{Proposals})$$
-$$\Delta = \text{MLP}(\text{RoI Features})$$
-精炼带来~2-3% AP提升，但增加20%延迟。</p>
-<p><strong>计算复杂度分析：</strong></p>
-<p>| 组件 | FLOPs | 占比 |</p>
-<table>
-<thead>
-<tr>
-<th>组件</th>
-<th>FLOPs</th>
-<th>占比</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>3D Sparse CNN</td>
-<td>5.2G</td>
-<td>45%</td>
-</tr>
-<tr>
-<td>BEV Backbone</td>
-<td>4.8G</td>
-<td>42%</td>
-</tr>
-<tr>
-<td>Detection Heads</td>
-<td>1.5G</td>
-<td>13%</td>
-</tr>
-<tr>
-<td>总计</td>
-<td>11.5G</td>
-<td>100%</td>
-</tr>
-</tbody>
-</table>
-<p>相比PointPillars（~63G），CenterPoint通过稀疏卷积实现5×加速。</p>
-<h3 id="213-bevbevformerbevdet">2.1.3 BEV感知网络：BEVFormer与BEVDet</h3>
-<h4 id="bevformer">BEVFormer的时空注意力机制</h4>
-<p>BEVFormer通过可学习的BEV queries与多视角图像特征交互，实现2D到3D的特征转换。</p>
-<p><strong>空间交叉注意力（SCA）：</strong>
-$$\text{SCA}(Q_p, F_t) = \sum_{i=1}^{N_{\text{ref}}} \text{DeformAttn}(Q_p, P(p, i, j), F_t^i)$$
-其中：</p>
-<ul>
-<li>$Q_p$: BEV位置 $p$ 的query</li>
-<li>$F_t^i$: 第 $i$ 个相机在时刻 $t$ 的特征</li>
-<li>$P(p, i, j)$: 3D到2D的投影函数</li>
-</ul>
-<p><strong>时序自注意力（TSA）：</strong>
-$$\text{TSA}(Q_t, B_{t-1}) = \text{DeformAttn}(Q_t, Q_t + \Delta, B_{t-1})$$
-这里 $\Delta$ 编码了自车运动补偿。</p>
-<p><strong>计算开销分解：</strong></p>
-<ul>
-<li>SCA: $O(N_{\text{BEV}} \times N_{\text{cam}} \times N_{\text{ref}} \times D^2)$</li>
-<li>TSA: $O(N_{\text{BEV}} \times N_{\text{temporal}} \times D^2)$</li>
-<li>总计: 约30 GFLOPs用于6相机输入</li>
-</ul>
-<h4 id="bevdet">BEVDet的深度估计策略</h4>
-<p>BEVDet通过显式深度估计构建BEV特征：</p>
-<p><strong>深度分布预测：</strong>
-$$D(u,v) = \text{Softmax}(\text{Conv}(F_{2D}(u,v))) \in \mathbb{R}^{D_{\text{bins}}}$$
-<strong>Lift-Splat变换：</strong>
-$$F_{\text{BEV}}(x,y) = \sum_{c=1}^{N_{\text{cam}}} \sum_{d=1}^{D_{\text{bins}}} F_{2D}^c(\pi_c(x,y,d)) \times D^c(\pi_c(x,y,d))$$
-其中 $\pi_c$ 为相机 $c$ 的投影矩阵。</p>
-<h3 id="214">2.1.4 轨迹预测与规划网络</h3>
-<h4 id="transformer">基于Transformer的轨迹预测</h4>
-<p>现代轨迹预测网络（如Wayformer）采用场景中心（scene-centric）表示：</p>
-<p><strong>Agent-Scene交互建模：</strong>
-$$h_i^{(l+1)} = h_i^{(l)} + \text{MHA}([h_i^{(l)}, E_{\text{pos}}^i], [H^{(l)}, E_{\text{pos}}])$$
-其中：</p>
-<ul>
-<li>$h_i$: agent $i$ 的隐状态</li>
-<li>$E_{\text{pos}}$: 位置编码</li>
-<li>$H$: 所有agents和地图元素的特征集合</li>
-</ul>
-<p><strong>多模态轨迹生成：</strong>
-$$P(Y|X) = \sum_{k=1}^{K} w_k \cdot \mathcal{N}(\mu_k(X), \Sigma_k(X))$$
-典型设置 $K=6$ 个模态，每个模态预测 $T=80$ 个时间步（8秒）。</p>
-<p><strong>计算需求：</strong></p>
-<ul>
-<li>Attention计算: $O(N^2 \times T \times D)$, 其中 $N \approx 200$ (agents + map)</li>
-<li>MLP解码: $O(K \times N \times T \times D^2)$</li>
-<li>总计: 约5 GFLOPs per scene</li>
-</ul>
-<h2 id="22-vlmvla">2.2 VLM/VLA工作负载特征</h2>
-<p>视觉语言模型（VLM）和视觉语言动作模型（VLA）代表了多模态AI的前沿，其计算特征与传统CV网络有显著差异。</p>
-<h3 id="221-clip">2.2.1 CLIP与对比学习的计算需求</h3>
-<h4 id="clip">CLIP的双塔架构</h4>
-<p>CLIP通过对比学习对齐视觉和文本表示，其架构设计充分考虑了大规模训练的效率需求：</p>
-<p><strong>架构设计哲学：</strong></p>
-<p>CLIP采用双塔架构而非融合架构的关键原因在于计算效率。在对比学习中，每个batch需要计算所有图像-文本对的相似度，双塔架构允许独立编码后仅需一次矩阵乘法，而融合架构需要 $B^2$ 次前向传播。这种设计在NPU上的优势包括：</p>
-<ol>
-<li><strong>独立并行处理</strong>：视觉和文本编码器可以部署在不同的计算单元上</li>
-<li><strong>特征缓存复用</strong>：编码后的特征可以缓存用于多次相似度计算</li>
-<li><strong>灵活的批处理</strong>：图像和文本可以使用不同的batch size优化吞吐量</li>
-</ol>
-<p><strong>视觉编码器（ViT-L/14）：</strong>
-$$Z_v = \text{ViT}(I) \in \mathbb{R}^{B \times D}$$
-计算量分解：
-$$\text{FLOPs}_{\text{ViT}} = 2 \times N \times (D \times D_{mlp} + N \times D^2/H)$$
-其中：</p>
-<ul>
-<li>$N = (224/14)^2 = 256$ patches（14×14的patch划分）</li>
-<li>$D = 1024$ 隐藏维度（比ResNet的2048维更硬件友好）</li>
-<li>$D_{mlp} = 4 \times D = 4096$（FFN扩展率）</li>
-<li>$H = 16$ 注意力头（每头64维，适合SIMD宽度）</li>
-</ul>
-<p>总计约 81 GFLOPs。</p>
-<p><strong>Patch Embedding的优化：</strong></p>
-<p>将图像分割为patches的过程可以通过不同方式实现：
-$$\text{Patch}(I) = \text{Reshape}(\text{Conv}_{14 \times 14, \text{stride}=14}(I))$$
-这个strided convolution在NPU上可以映射为：</p>
-<ul>
-<li>内存重排操作（无计算）+ 矩阵乘法</li>
-<li>或直接的大核卷积（需要专门的大核支持）</li>
-</ul>
-<p><strong>文本编码器（Transformer）：</strong>
-$$Z_t = \text{TextEncoder}(T) \in \mathbb{R}^{B \times D}$$
-计算量相对较小（约 6 GFLOPs for 77 tokens）。</p>
-<p><strong>对比损失计算：</strong>
-$$\mathcal{L} = -\frac{1}{2B}\sum_{i=1}^{B}\left[\log\frac{e^{z_v^i \cdot z_t^i / \tau}}{\sum_{j=1}^{B} e^{z_v^i \cdot z_t^j / \tau}} + \log\frac{e^{z_t^i \cdot z_v^i / \tau}}{\sum_{j=1}^{B} e^{z_t^i \cdot z_v^j / \tau}}\right]$$
-批量矩阵乘法需求：$Z_v Z_t^T \in \mathbb{R}^{B \times B}$</p>
-<h3 id="222-llavaflamingo">2.2.2 LLaVA与Flamingo的多模态架构</h3>
-<h4 id="llava">LLaVA的简单投影策略</h4>
-<p>LLaVA通过线性投影连接视觉编码器和语言模型：</p>
-<p><strong>视觉特征投影：</strong>
-$$H_v = W \cdot Z_v, \quad W \in \mathbb{R}^{D_{llm} \times D_{vision}}$$
-<strong>多模态序列构建：</strong>
-$$X = [\text{System}, H_v, \text{User}, \text{Assistant}]$$
-<strong>计算分布：</strong></p>
-<ul>
-<li>Vision Encoder: 5.6 GFLOPs (CLIP ViT-L/14, 336×336)</li>
-<li>Projection: 0.01 GFLOPs</li>
-<li>LLM (7B): 14 GFLOPs per token</li>
-<li>总推理: 约 20 GFLOPs for 100 tokens output</li>
-</ul>
-<h4 id="flamingoperceiver-resampler">Flamingo的Perceiver Resampler</h4>
-<p>Flamingo通过Perceiver架构处理可变长度视觉输入：</p>
-<p><strong>Perceiver交叉注意力：</strong>
-$$Q_{\text{latent}} \in \mathbb{R}^{N_q \times D}, \quad K_V = \phi(X_{\text{visual}}) \in \mathbb{R}^{N_v \times D}$$
-其中 $N_q = 64$ 固定查询数，$N_v$ 可变。</p>
-<p><strong>Gated Cross-Attention到LLM：</strong>
-$$h' = h + \tanh(\alpha) \cdot \text{CrossAttn}(h, Z_{\text{visual}})$$
-门控机制 $\alpha$ 初始化为0，实现渐进式适应。</p>
-<h3 id="223-rt-1rt-2">2.2.3 RT-1/RT-2机器人控制模型</h3>
-<h4 id="rt-1">RT-1的实时控制架构</h4>
-<p>RT-1 (Robotics Transformer 1) 将机器人控制建模为序列决策问题：</p>
-<p><strong>输入表示：</strong>
-$$X_t = [\text{Image}_t, \text{Language}, \text{State}_t]$$
-其中：</p>
-<ul>
-<li>$\text{Image}_t \in \mathbb{R}^{300 \times 300 \times 3}$: RGB观察</li>
-<li>$\text{Language}$: 自然语言指令的embedding</li>
-<li>$\text{State}_t \in \mathbb{R}^{8}$: 关节角度和夹爪状态</li>
-</ul>
-<p><strong>动作tokenization：</strong>
-将连续动作离散化为256个bins：
-$$a_t = [\Delta x, \Delta y, \Delta z, \Delta\text{yaw}, \Delta\text{pitch}, \Delta\text{roll}, \text{gripper}]$$
-<strong>计算需求：</strong></p>
-<ul>
-<li>Vision: EfficientNet-B3, 1.8 GFLOPs</li>
-<li>Transformer: 8层, 2.5 GFLOPs  </li>
-<li>动作解码: 0.1 GFLOPs</li>
-<li>总延迟要求: &lt; 100ms (10Hz控制)</li>
-</ul>
-<h4 id="rt-2-">RT-2的视觉-语言-动作统一</h4>
-<p>RT-2将预训练VLM适配为VLA，实现知识迁移：</p>
-<p><strong>统一tokenization：</strong>
-$$\text{Vocab} = \text{Vocab}_{\text{language}} \cup \text{Vocab}_{\text{action}}$$
-动作tokens作为特殊词汇：<code>&lt;move_x_+10&gt;</code>, <code>&lt;rotate_z_-5&gt;</code>等。</p>
-<p><strong>Co-fine-tuning策略：</strong>
-$$\mathcal{L} = \lambda_1 \mathcal{L}_{\text{language}} + \lambda_2 \mathcal{L}_{\text{action}} + \lambda_3 \mathcal{L}_{\text{vision}}$$
-保持多任务能力的同时学习控制。</p>
-<p><strong>推理模式切换：</strong></p>
-<ul>
-<li>语言生成: beam search, $B=4$</li>
-<li>动作生成: greedy decoding, $B=1$</li>
-<li>混合模式: 先生成语言reasoning，后生成动作</li>
-</ul>
-<h2 id="23">2.3 算子级性能分析</h2>
-<p>深入理解核心算子的计算特征是NPU优化的基础。本节量化分析GEMM、卷积、注意力等算子的性能特征。</p>
-<h3 id="231-gemm">2.3.1 GEMM的计算密度分析</h3>
-<h4 id="gemm">标准GEMM的算术强度</h4>
-<p>对于 $C = A \times B$，其中 $A \in \mathbb{R}^{M \times K}$, $B \in \mathbb{R}^{K \times N}$：</p>
-<p><strong>计算量：</strong>
-$$\text{FLOPs} = 2MNK$$
-<strong>内存访问量（无重用）：</strong>
-$$\text{Memory} = (MK + KN + MN) \times \text{sizeof(dtype)}$$
-<strong>算术强度（Arithmetic Intensity）：</strong>
-$$AI = \frac{2MNK}{(MK + KN + MN) \times \text{sizeof(dtype)}}$$
-对于方阵 $M=N=K$：
-$$AI = \frac{2K}{3 \times \text{sizeof(dtype)}}$$
-<strong>nvfp4 (E2M1)影响：</strong></p>
-<ul>
-<li>sizeof(nvfp4) = 0.5 bytes</li>
-<li>$AI_{\text{nvfp4}} = 2 \times AI_{\text{fp8}}$</li>
-<li>理论峰值提升，但精度损失需权衡</li>
-</ul>
-<h4 id="batch-gemm">Batch GEMM的优化机会</h4>
-<p>批量矩阵乘法 $C_i = A_i \times B_i$ for $i \in [1, B]$：</p>
-<p><strong>数据重用分析：</strong></p>
-<ol>
-<li>
-<p><strong>Weight-stationary (B相同)</strong>：
-$$\text{Reuse}_B = B$$
-适用于全连接层推理</p>
-</li>
-<li>
-<p><strong>Input-stationary (A相同)</strong>：
-$$\text{Reuse}_A = B$$
-适用于多头注意力的QKV投影</p>
-</li>
-<li>
-<p><strong>Output-stationary</strong>：
-   部分和累加，减少输出带宽</p>
-</li>
-</ol>
-<h3 id="232-conv2d">2.3.2 Conv2D的内存访问模式</h3>
-<h4 id="im2col">Im2col变换分析</h4>
-<p>Im2col将卷积转换为GEMM：</p>
-<p><strong>展开后矩阵大小：</strong>
-$$\text{Im2col}: \mathbb{R}^{C_{in} \times H \times W} \to \mathbb{R}^{(C_{in} \times K_h \times K_w) \times (H_{out} \times W_{out})}$$
-<strong>内存膨胀率：</strong>
-$$\text{Expansion} = K_h \times K_w$$
-对于3×3卷积，数据量增加9倍。</p>
-<h4 id="direct-convolution">Direct Convolution的滑窗策略</h4>
-<p>直接卷积避免内存膨胀：</p>
-<p><strong>计算循环嵌套：</strong></p>
-<div class="codehilite"><pre><span></span><code>for n in [0, N):          # Batch
-  for c_out in [0, C_out): # Output channels  
+<p>模态权重学习:
+w_k = Softmax(MLP(scene_features))
+根据场景特征动态调整各模态概率</p>
+<div class="codehilite"><pre><span></span><code><span class="nx">这种多模态设计对NPU的挑战在于需要并行计算6个不同的轨迹假设</span><span class="err">，</span><span class="nx">每个假设都需要完整的前向传播</span><span class="err">。</span><span class="nx">通过批处理和权重共享</span><span class="err">，</span><span class="nx">可以将计算开销从6倍降低到2</span><span class="o">-</span><span class="mi">3</span><span class="nx">倍</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">计算需求</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">Attention计算</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">T</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="p">)</span><span class="err">$</span><span class="p">,</span><span class="w"> </span><span class="nx">其中</span><span class="w"> </span><span class="err">$</span><span class="nx">N</span><span class="w"> </span><span class="err">\</span><span class="nx">approx</span><span class="w"> </span><span class="mi">200</span><span class="err">$</span><span class="w"> </span><span class="p">(</span><span class="nx">agents</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">map</span><span class="p">)</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">MLP解码</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">K</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">N</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">T</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="o">^</span><span class="mi">2</span><span class="p">)</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">总计</span><span class="p">:</span><span class="w"> </span><span class="nx">约5</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w"> </span><span class="nx">per</span><span class="w"> </span><span class="nx">scene</span>
+
+<span class="err">##</span><span class="w"> </span><span class="m m-Double">2.2</span><span class="w"> </span><span class="nx">VLM</span><span class="o">/</span><span class="nx">VLA工作负载特征</span>
+
+<span class="nx">视觉语言模型</span><span class="err">（</span><span class="nx">VLM</span><span class="err">）</span><span class="nx">和视觉语言动作模型</span><span class="err">（</span><span class="nx">VLA</span><span class="err">）</span><span class="nx">代表了多模态AI的前沿</span><span class="err">，</span><span class="nx">其计算特征与传统CV网络有显著差异</span><span class="err">。</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.2.1</span><span class="w"> </span><span class="nx">CLIP与对比学习的计算需求</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">CLIP的双塔架构</span>
+
+<span class="nx">CLIP通过对比学习对齐视觉和文本表示</span><span class="err">，</span><span class="nx">其架构设计充分考虑了大规模训练的效率需求</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">架构设计哲学</span><span class="err">：</span><span class="o">**</span>
+
+<span class="nx">CLIP采用双塔架构而非融合架构的关键原因在于计算效率</span><span class="err">。</span><span class="nx">在对比学习中</span><span class="err">，</span><span class="nx">每个batch需要计算所有图像</span><span class="o">-</span><span class="nx">文本对的相似度</span><span class="err">，</span><span class="nx">双塔架构允许独立编码后仅需一次矩阵乘法</span><span class="err">，</span><span class="nx">而融合架构需要</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="o">^</span><span class="mi">2</span><span class="err">$</span><span class="w"> </span><span class="nx">次前向传播</span><span class="err">。</span><span class="nx">这种设计在NPU上的优势包括</span><span class="err">：</span>
+
+<span class="mi">1</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">独立并行处理</span><span class="o">**</span><span class="err">：</span><span class="nx">视觉和文本编码器可以部署在不同的计算单元上</span>
+<span class="mi">2</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">特征缓存复用</span><span class="o">**</span><span class="err">：</span><span class="nx">编码后的特征可以缓存用于多次相似度计算</span>
+<span class="mi">3</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">灵活的批处理</span><span class="o">**</span><span class="err">：</span><span class="nx">图像和文本可以使用不同的batch</span><span class="w"> </span><span class="nx">size优化吞吐量</span>
+
+<span class="o">**</span><span class="nx">视觉编码器</span><span class="err">（</span><span class="nx">ViT</span><span class="o">-</span><span class="nx">L</span><span class="o">/</span><span class="mi">14</span><span class="err">）：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">Z</span><span class="err">\</span><span class="nx">_v</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">ViT</span><span class="p">}(</span><span class="nx">I</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="p">}</span><span class="err">$$</span>
+<span class="nx">计算量分解</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">FLOPs</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">ViT</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">N</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="p">(</span><span class="nx">D</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">mlp</span><span class="p">}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">N</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="o">^</span><span class="mi">2</span><span class="o">/</span><span class="nx">H</span><span class="p">)</span><span class="err">$$</span>
+<span class="nx">其中</span><span class="err">：</span>
+
+<span class="o">-</span><span class="w"> </span><span class="err">$</span><span class="nx">N</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">(</span><span class="mi">224</span><span class="o">/</span><span class="mi">14</span><span class="p">)</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">256</span><span class="err">$</span><span class="w"> </span><span class="nx">patches</span><span class="err">（</span><span class="mi">14</span><span class="err">×</span><span class="mi">14</span><span class="nx">的patch划分</span><span class="err">）</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$</span><span class="nx">D</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1024</span><span class="err">$</span><span class="w"> </span><span class="nx">隐藏维度</span><span class="err">（</span><span class="nx">比ResNet的2048维更硬件友好</span><span class="err">）</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$</span><span class="nx">D</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">mlp</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">4096</span><span class="err">$（</span><span class="nx">FFN扩展率</span><span class="err">）</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$</span><span class="nx">H</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">16</span><span class="err">$</span><span class="w"> </span><span class="nx">注意力头</span><span class="err">（</span><span class="nx">每头64维</span><span class="err">，</span><span class="nx">适合SIMD宽度</span><span class="err">）</span>
+
+<span class="nx">总计约</span><span class="w"> </span><span class="mi">81</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">Patch</span><span class="w"> </span><span class="nx">Embedding的优化</span><span class="err">：</span><span class="o">**</span>
+
+<span class="nx">将图像分割为patches的过程可以通过不同方式实现</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Patch</span><span class="p">}(</span><span class="nx">I</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Reshape</span><span class="p">}(</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Conv</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="mi">14</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">stride</span><span class="p">}=</span><span class="mi">14</span><span class="p">}(</span><span class="nx">I</span><span class="p">))</span><span class="err">$$</span>
+<span class="nx">这个strided</span><span class="w"> </span><span class="nx">convolution在NPU上可以映射为</span><span class="err">：</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">内存重排操作</span><span class="err">（</span><span class="nx">无计算</span><span class="err">）</span><span class="o">+</span><span class="w"> </span><span class="nx">矩阵乘法</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">或直接的大核卷积</span><span class="err">（</span><span class="nx">需要专门的大核支持</span><span class="err">）</span>
+
+<span class="o">**</span><span class="nx">文本编码器</span><span class="err">（</span><span class="nx">Transformer</span><span class="err">）：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">Z</span><span class="err">\</span><span class="nx">_t</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">TextEncoder</span><span class="p">}(</span><span class="nx">T</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="p">}</span><span class="err">$$</span>
+<span class="nx">计算量相对较小</span><span class="err">（</span><span class="nx">约</span><span class="w"> </span><span class="mi">6</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="mi">77</span><span class="w"> </span><span class="nx">tokens</span><span class="err">）。</span>
+
+<span class="o">**</span><span class="nx">对比损失计算</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">mathcal</span><span class="p">{</span><span class="nx">L</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">-</span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="mi">1</span><span class="p">}{</span><span class="mi">2</span><span class="nx">B</span><span class="p">}</span><span class="err">\</span><span class="nx">sum</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">i</span><span class="p">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="p">}</span><span class="err">\</span><span class="nx">left</span><span class="p">[</span><span class="err">\</span><span class="nx">log</span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="nx">z</span><span class="err">\</span><span class="nx">_v</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="nx">z</span><span class="err">\</span><span class="nx">_t</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="err">\</span><span class="nx">tau</span><span class="p">}}{</span><span class="err">\</span><span class="nx">sum</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">j</span><span class="p">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="p">}</span><span class="w"> </span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="nx">z</span><span class="err">\</span><span class="nx">_v</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="nx">z</span><span class="err">\</span><span class="nx">_t</span><span class="o">^</span><span class="nx">j</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="err">\</span><span class="nx">tau</span><span class="p">}}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">log</span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="nx">z</span><span class="err">\</span><span class="nx">_t</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="nx">z</span><span class="err">\</span><span class="nx">_v</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="err">\</span><span class="nx">tau</span><span class="p">}}{</span><span class="err">\</span><span class="nx">sum</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">j</span><span class="p">=</span><span class="mi">1</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="p">}</span><span class="w"> </span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="nx">z</span><span class="err">\</span><span class="nx">_t</span><span class="o">^</span><span class="nx">i</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="nx">z</span><span class="err">\</span><span class="nx">_v</span><span class="o">^</span><span class="nx">j</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="err">\</span><span class="nx">tau</span><span class="p">}}</span><span class="err">\</span><span class="nx">right</span><span class="p">]</span><span class="err">$$</span>
+<span class="nx">批量矩阵乘法需求</span><span class="err">：$</span><span class="nx">Z</span><span class="err">\</span><span class="nx">_v</span><span class="w"> </span><span class="nx">Z</span><span class="err">\</span><span class="nx">_t</span><span class="o">^</span><span class="nx">T</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">B</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">B</span><span class="p">}</span><span class="err">$</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.2.2</span><span class="w"> </span><span class="nx">LLaVA与Flamingo的多模态架构</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">LLaVA的简单投影策略</span>
+
+<span class="nx">LLaVA通过线性投影连接视觉编码器和语言模型</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">视觉特征投影</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">H</span><span class="err">\</span><span class="nx">_v</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">W</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="nx">Z</span><span class="err">\</span><span class="nx">_v</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">quad</span><span class="w"> </span><span class="nx">W</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">D</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">llm</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">vision</span><span class="p">}}</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">多模态序列构建</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">X</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">System</span><span class="p">},</span><span class="w"> </span><span class="nx">H</span><span class="err">\</span><span class="nx">_v</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">User</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Assistant</span><span class="p">}]</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">计算分布</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">Vision</span><span class="w"> </span><span class="nx">Encoder</span><span class="p">:</span><span class="w"> </span><span class="m m-Double">5.6</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w"> </span><span class="p">(</span><span class="nx">CLIP</span><span class="w"> </span><span class="nx">ViT</span><span class="o">-</span><span class="nx">L</span><span class="o">/</span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="mi">336</span><span class="err">×</span><span class="mi">336</span><span class="p">)</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Projection</span><span class="p">:</span><span class="w"> </span><span class="m m-Double">0.01</span><span class="w"> </span><span class="nx">GFLOPs</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">LLM</span><span class="w"> </span><span class="p">(</span><span class="mi">7</span><span class="nx">B</span><span class="p">):</span><span class="w"> </span><span class="mi">14</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w"> </span><span class="nx">per</span><span class="w"> </span><span class="nx">token</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">总推理</span><span class="p">:</span><span class="w"> </span><span class="nx">约</span><span class="w"> </span><span class="mi">20</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="nx">tokens</span><span class="w"> </span><span class="nx">output</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">Flamingo的Perceiver</span><span class="w"> </span><span class="nx">Resampler</span>
+
+<span class="nx">Flamingo通过Perceiver架构处理可变长度视觉输入</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">Perceiver交叉注意力</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">Q</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">latent</span><span class="p">}}</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">N</span><span class="err">\</span><span class="nx">_q</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">quad</span><span class="w"> </span><span class="nx">K</span><span class="err">\</span><span class="nx">_V</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">phi</span><span class="p">(</span><span class="nx">X</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">visual</span><span class="p">}})</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">N</span><span class="err">\</span><span class="nx">_v</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">D</span><span class="p">}</span><span class="err">$$</span>
+<span class="nx">其中</span><span class="w"> </span><span class="err">$</span><span class="nx">N</span><span class="err">\</span><span class="nx">_q</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">64</span><span class="err">$</span><span class="w"> </span><span class="nx">固定查询数</span><span class="err">，$</span><span class="nx">N</span><span class="err">\</span><span class="nx">_v</span><span class="err">$</span><span class="w"> </span><span class="nx">可变</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">Gated</span><span class="w"> </span><span class="nx">Cross</span><span class="o">-</span><span class="nx">Attention到LLM</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">h</span><span class="err">&#39;</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">h</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">tanh</span><span class="p">(</span><span class="err">\</span><span class="nx">alpha</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="nx">cdot</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">CrossAttn</span><span class="p">}(</span><span class="nx">h</span><span class="p">,</span><span class="w"> </span><span class="nx">Z</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">visual</span><span class="p">}})</span><span class="err">$$</span>
+<span class="nx">门控机制</span><span class="w"> </span><span class="err">$\</span><span class="nx">alpha</span><span class="err">$</span><span class="w"> </span><span class="nx">初始化为0</span><span class="err">，</span><span class="nx">实现渐进式适应</span><span class="err">。</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.2.3</span><span class="w"> </span><span class="nx">RT</span><span class="o">-</span><span class="mi">1</span><span class="o">/</span><span class="nx">RT</span><span class="o">-</span><span class="mi">2</span><span class="nx">机器人控制模型</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">RT</span><span class="o">-</span><span class="mi">1</span><span class="nx">的实时控制架构</span>
+
+<span class="nx">RT</span><span class="o">-</span><span class="mi">1</span><span class="w"> </span><span class="p">(</span><span class="nx">Robotics</span><span class="w"> </span><span class="nx">Transformer</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="nx">将机器人控制建模为序列决策问题</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">输入表示</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">X</span><span class="err">\</span><span class="nx">_t</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Image</span><span class="p">}</span><span class="err">\</span><span class="nx">_t</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Language</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">State</span><span class="p">}</span><span class="err">\</span><span class="nx">_t</span><span class="p">]</span><span class="err">$$</span>
+<span class="nx">其中</span><span class="err">：</span>
+
+<span class="o">-</span><span class="w"> </span><span class="err">$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Image</span><span class="p">}</span><span class="err">\</span><span class="nx">_t</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="mi">300</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">300</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">3</span><span class="p">}</span><span class="err">$</span><span class="p">:</span><span class="w"> </span><span class="nx">RGB观察</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Language</span><span class="p">}</span><span class="err">$</span><span class="p">:</span><span class="w"> </span><span class="nx">自然语言指令的embedding</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">State</span><span class="p">}</span><span class="err">\</span><span class="nx">_t</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="mi">8</span><span class="p">}</span><span class="err">$</span><span class="p">:</span><span class="w"> </span><span class="nx">关节角度和夹爪状态</span>
+
+<span class="o">**</span><span class="nx">动作tokenization</span><span class="err">：</span><span class="o">**</span>
+<span class="nx">将连续动作离散化为256个bins</span><span class="err">：</span>
+<span class="err">$$</span><span class="nx">a</span><span class="err">\</span><span class="nx">_t</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="err">\</span><span class="nx">Delta</span><span class="w"> </span><span class="nx">x</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">Delta</span><span class="w"> </span><span class="nx">y</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">Delta</span><span class="w"> </span><span class="nx">z</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">Delta</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">yaw</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">Delta</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">pitch</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">Delta</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">roll</span><span class="p">},</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">gripper</span><span class="p">}]</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">计算需求</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">Vision</span><span class="p">:</span><span class="w"> </span><span class="nx">EfficientNet</span><span class="o">-</span><span class="nx">B3</span><span class="p">,</span><span class="w"> </span><span class="m m-Double">1.8</span><span class="w"> </span><span class="nx">GFLOPs</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Transformer</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="nx">层</span><span class="p">,</span><span class="w"> </span><span class="m m-Double">2.5</span><span class="w"> </span><span class="nx">GFLOPs</span><span class="w">  </span>
+<span class="o">-</span><span class="w"> </span><span class="nx">动作解码</span><span class="p">:</span><span class="w"> </span><span class="m m-Double">0.1</span><span class="w"> </span><span class="nx">GFLOPs</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">总延迟要求</span><span class="p">:</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">100</span><span class="nx">ms</span><span class="w"> </span><span class="p">(</span><span class="mi">10</span><span class="nx">Hz控制</span><span class="p">)</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">RT</span><span class="o">-</span><span class="mi">2</span><span class="nx">的视觉</span><span class="o">-</span><span class="nx">语言</span><span class="o">-</span><span class="nx">动作统一</span>
+
+<span class="nx">RT</span><span class="o">-</span><span class="mi">2</span><span class="nx">将预训练VLM适配为VLA</span><span class="err">，</span><span class="nx">实现知识迁移</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">统一tokenization</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Vocab</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Vocab</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">language</span><span class="p">}}</span><span class="w"> </span><span class="err">\</span><span class="nx">cup</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Vocab</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">action</span><span class="p">}}</span><span class="err">$$</span>
+<span class="nx">动作tokens作为特殊词汇</span><span class="err">：`</span><span class="p">&lt;</span><span class="nx">move_x_</span><span class="o">+</span><span class="mi">10</span><span class="p">&gt;</span><span class="err">`</span><span class="p">,</span><span class="w"> </span><span class="err">`</span><span class="p">&lt;</span><span class="nx">rotate_z_</span><span class="o">-</span><span class="mi">5</span><span class="p">&gt;</span><span class="err">`</span><span class="nx">等</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">Co</span><span class="o">-</span><span class="nx">fine</span><span class="o">-</span><span class="nx">tuning策略</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">mathcal</span><span class="p">{</span><span class="nx">L</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">lambda</span><span class="err">\</span><span class="nx">_1</span><span class="w"> </span><span class="err">\</span><span class="nx">mathcal</span><span class="p">{</span><span class="nx">L</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">language</span><span class="p">}}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">lambda</span><span class="err">\</span><span class="nx">_2</span><span class="w"> </span><span class="err">\</span><span class="nx">mathcal</span><span class="p">{</span><span class="nx">L</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">action</span><span class="p">}}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">lambda</span><span class="err">\</span><span class="nx">_3</span><span class="w"> </span><span class="err">\</span><span class="nx">mathcal</span><span class="p">{</span><span class="nx">L</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">vision</span><span class="p">}}</span><span class="err">$$</span>
+<span class="nx">保持多任务能力的同时学习控制</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">推理模式切换</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">语言生成</span><span class="p">:</span><span class="w"> </span><span class="nx">beam</span><span class="w"> </span><span class="nx">search</span><span class="p">,</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="p">=</span><span class="mi">4</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">动作生成</span><span class="p">:</span><span class="w"> </span><span class="nx">greedy</span><span class="w"> </span><span class="nx">decoding</span><span class="p">,</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="p">=</span><span class="mi">1</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">混合模式</span><span class="p">:</span><span class="w"> </span><span class="nx">先生成语言reasoning</span><span class="err">，</span><span class="nx">后生成动作</span>
+
+<span class="err">##</span><span class="w"> </span><span class="m m-Double">2.3</span><span class="w"> </span><span class="nx">算子级性能分析</span>
+
+<span class="nx">深入理解核心算子的计算特征是NPU优化的基础</span><span class="err">。</span><span class="nx">本节量化分析GEMM</span><span class="err">、</span><span class="nx">卷积</span><span class="err">、</span><span class="nx">注意力等算子的性能特征</span><span class="err">。</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.3.1</span><span class="w"> </span><span class="nx">GEMM的计算密度分析</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">标准GEMM的算术强度</span>
+
+<span class="nx">对于</span><span class="w"> </span><span class="err">$</span><span class="nx">C</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">A</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">B</span><span class="err">$，</span><span class="nx">其中</span><span class="w"> </span><span class="err">$</span><span class="nx">A</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">M</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">K</span><span class="p">}</span><span class="err">$</span><span class="p">,</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">K</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">N</span><span class="p">}</span><span class="err">$：</span>
+
+<span class="o">**</span><span class="nx">计算量</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">FLOPs</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="nx">MNK</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">内存访问量</span><span class="err">（</span><span class="nx">无重用</span><span class="err">）：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Memory</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">(</span><span class="nx">MK</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">KN</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">MN</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">dtype</span><span class="p">)}</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">算术强度</span><span class="err">（</span><span class="nx">Arithmetic</span><span class="w"> </span><span class="nx">Intensity</span><span class="err">）：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">AI</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="mi">2</span><span class="nx">MNK</span><span class="p">}{(</span><span class="nx">MK</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">KN</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">MN</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">dtype</span><span class="p">)}}</span><span class="err">$$</span>
+<span class="nx">对于方阵</span><span class="w"> </span><span class="err">$</span><span class="nx">M</span><span class="p">=</span><span class="nx">N</span><span class="p">=</span><span class="nx">K</span><span class="err">$：</span>
+<span class="err">$$</span><span class="nx">AI</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="mi">2</span><span class="nx">K</span><span class="p">}{</span><span class="mi">3</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">dtype</span><span class="p">)}}</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">nvfp4</span><span class="w"> </span><span class="p">(</span><span class="nx">E2M1</span><span class="p">)</span><span class="nx">影响</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">nvfp4</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="m m-Double">0.5</span><span class="w"> </span><span class="nx">bytes</span>
+<span class="o">-</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">nvfp4</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">fp8</span><span class="p">}}</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">理论峰值提升</span><span class="err">，</span><span class="nx">但精度损失需权衡</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">Batch</span><span class="w"> </span><span class="nx">GEMM的优化机会</span>
+
+<span class="nx">批量矩阵乘法</span><span class="w"> </span><span class="err">$</span><span class="nx">C</span><span class="err">\</span><span class="nx">_i</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">A</span><span class="err">\</span><span class="nx">_i</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">B</span><span class="err">\</span><span class="nx">_i</span><span class="err">$</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="err">$</span><span class="nx">i</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nx">B</span><span class="p">]</span><span class="err">$：</span>
+
+<span class="o">**</span><span class="nx">数据重用分析</span><span class="err">：</span><span class="o">**</span>
+
+<span class="mi">1</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">Weight</span><span class="o">-</span><span class="nx">stationary</span><span class="w"> </span><span class="p">(</span><span class="nx">B相同</span><span class="p">)</span><span class="o">**</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Reuse</span><span class="p">}</span><span class="err">\</span><span class="nx">_B</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">B</span><span class="err">$$</span>
+<span class="nx">适用于全连接层推理</span>
+
+<span class="mi">2</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">Input</span><span class="o">-</span><span class="nx">stationary</span><span class="w"> </span><span class="p">(</span><span class="nx">A相同</span><span class="p">)</span><span class="o">**</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Reuse</span><span class="p">}</span><span class="err">\</span><span class="nx">_A</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">B</span><span class="err">$$</span>
+<span class="nx">适用于多头注意力的QKV投影</span>
+
+<span class="mi">3</span><span class="p">.</span><span class="w"> </span><span class="o">**</span><span class="nx">Output</span><span class="o">-</span><span class="nx">stationary</span><span class="o">**</span><span class="err">：</span>
+<span class="w">   </span><span class="nx">部分和累加</span><span class="err">，</span><span class="nx">减少输出带宽</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.3.2</span><span class="w"> </span><span class="nx">Conv2D的内存访问模式</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">Im2col变换分析</span>
+
+<span class="nx">Im2col将卷积转换为GEMM</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">展开后矩阵大小</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Im2col</span><span class="p">}:</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">C</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="k">in</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">H</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">W</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">to</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{(</span><span class="nx">C</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="k">in</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">K</span><span class="err">\</span><span class="nx">_h</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">K</span><span class="err">\</span><span class="nx">_w</span><span class="p">)</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="p">(</span><span class="nx">H</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">out</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">W</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="nx">out</span><span class="p">})}</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">内存膨胀率</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Expansion</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">K</span><span class="err">\</span><span class="nx">_h</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">K</span><span class="err">\</span><span class="nx">_w</span><span class="err">$$</span>
+<span class="nx">对于3</span><span class="err">×</span><span class="mi">3</span><span class="nx">卷积</span><span class="err">，</span><span class="nx">数据量增加9倍</span><span class="err">。</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">Direct</span><span class="w"> </span><span class="nx">Convolution的滑窗策略</span>
+
+<span class="nx">直接卷积避免内存膨胀</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">计算循环嵌套</span><span class="err">：</span><span class="o">**</span>
+</code></pre></div>
+
+<p>for n in [0, N):          # Batch
+  for c_out in [0, C_out): # Output channels<br />
     for h in [0, H_out):   # Height
       for w in [0, W_out): # Width
         for c_in in [0, C_in):    # Input channels
           for kh in [0, K_h):     # Kernel height
             for kw in [0, K_w]:   # Kernel width
               out[n,c_out,h,w] += 
-                in[n,c_in,h+kh,w+kw] * weight[c_out,c_in,kh,kw]
+                in[n,c_in,h+kh,w+kw] * weight[c_out,c_in,kh,kw]</p>
+<div class="codehilite"><pre><span></span><code><span class="o">**</span><span class="nx">Loop</span><span class="w"> </span><span class="nx">tiling优化</span><span class="err">：</span><span class="o">**</span>
+<span class="nx">将循环分块以适配片上存储</span><span class="err">：</span>
+<span class="err">$$</span><span class="nx">T</span><span class="err">\</span><span class="nx">_h</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">T</span><span class="err">\</span><span class="nx">_w</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">C</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="k">in</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">dtype</span><span class="p">)}</span><span class="w"> </span><span class="err">\</span><span class="nx">leq</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">SRAM</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">size</span><span class="p">}}</span><span class="err">$$</span>
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.3.3</span><span class="w"> </span><span class="nx">Attention的计算瓶颈</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">标准Attention的二次复杂度</span>
+
+<span class="k">Self</span><span class="o">-</span><span class="nx">attention计算</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Attention</span><span class="p">}(</span><span class="nx">Q</span><span class="p">,</span><span class="nx">K</span><span class="p">,</span><span class="nx">V</span><span class="p">)</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Softmax</span><span class="p">}</span><span class="err">\</span><span class="nx">left</span><span class="p">(</span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">QK</span><span class="o">^</span><span class="nx">T</span><span class="p">}{</span><span class="err">\</span><span class="nx">sqrt</span><span class="p">{</span><span class="nx">d</span><span class="p">}}</span><span class="err">\</span><span class="nx">right</span><span class="p">)</span><span class="nx">V</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">计算复杂度</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">QK矩阵乘</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="p">)</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Softmax</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="p">)</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Score</span><span class="err">×</span><span class="nx">V</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="p">)</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">总计</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="p">)</span><span class="err">$</span>
+
+<span class="o">**</span><span class="nx">内存需求</span><span class="err">：</span><span class="o">**</span>
+<span class="nx">存储attention矩阵需要</span><span class="w"> </span><span class="err">$</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sizeof</span><span class="p">(</span><span class="nx">dtype</span><span class="p">)}</span><span class="err">$</span><span class="w"> </span><span class="nx">字节</span><span class="err">。</span>
+
+<span class="nx">对于序列长度</span><span class="w"> </span><span class="err">$</span><span class="nx">N</span><span class="p">=</span><span class="mi">2048</span><span class="err">$</span><span class="p">,</span><span class="w"> </span><span class="nx">fp16精度</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Memory</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2048</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">8</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">MB</span><span class="p">}</span><span class="err">$$</span>
+<span class="err">####</span><span class="w"> </span><span class="nx">Flash</span><span class="w"> </span><span class="nx">Attention的分块计算</span>
+
+<span class="nx">Flash</span><span class="w"> </span><span class="nx">Attention通过分块降低内存访问</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">分块策略</span><span class="err">：</span><span class="o">**</span>
+<span class="nx">将</span><span class="w"> </span><span class="err">$</span><span class="nx">Q</span><span class="p">,</span><span class="nx">K</span><span class="p">,</span><span class="nx">V</span><span class="w"> </span><span class="err">\</span><span class="k">in</span><span class="w"> </span><span class="err">\</span><span class="nx">mathbb</span><span class="p">{</span><span class="nx">R</span><span class="p">}</span><span class="o">^</span><span class="p">{</span><span class="nx">N</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="p">}</span><span class="err">$</span><span class="w"> </span><span class="nx">分为大小为</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="err">\</span><span class="nx">_r</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="err">$</span><span class="w"> </span><span class="nx">和</span><span class="w"> </span><span class="err">$</span><span class="nx">B</span><span class="err">\</span><span class="nx">_c</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">d</span><span class="err">$</span><span class="w"> </span><span class="nx">的块</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">Online</span><span class="w"> </span><span class="nx">softmax</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">m</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">max</span><span class="p">(</span><span class="nx">m</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)},</span><span class="w"> </span><span class="err">\</span><span class="nx">tilde</span><span class="p">{</span><span class="nx">m</span><span class="p">}</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)})</span><span class="err">$$</span>
+<span class="err">$$</span><span class="nx">l</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="nx">m</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)}</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nx">m</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)}}</span><span class="w"> </span><span class="nx">l</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">e</span><span class="o">^</span><span class="p">{</span><span class="err">\</span><span class="nx">tilde</span><span class="p">{</span><span class="nx">m</span><span class="p">}</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)}</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nx">m</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)}}</span><span class="w"> </span><span class="err">\</span><span class="nx">tilde</span><span class="p">{</span><span class="nx">l</span><span class="p">}</span><span class="o">^</span><span class="p">{(</span><span class="nx">j</span><span class="p">)}</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">IO复杂度降低</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">IO</span><span class="p">}</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Flash</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">O</span><span class="err">\</span><span class="nx">left</span><span class="p">(</span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="nx">d</span><span class="p">}{</span><span class="nx">M</span><span class="o">^</span><span class="p">{</span><span class="mi">1</span><span class="o">/</span><span class="mi">2</span><span class="p">}}</span><span class="err">\</span><span class="nx">right</span><span class="p">)</span><span class="err">$$</span>
+<span class="nx">其中</span><span class="w"> </span><span class="err">$</span><span class="nx">M</span><span class="err">$</span><span class="w"> </span><span class="nx">为SRAM大小</span><span class="err">。</span><span class="nx">相比标准attention的</span><span class="w"> </span><span class="err">$</span><span class="nx">O</span><span class="p">(</span><span class="nx">N</span><span class="o">^</span><span class="mi">2</span><span class="nx">d</span><span class="p">)</span><span class="err">$，</span><span class="nx">显著降低</span><span class="err">。</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.3.4</span><span class="w"> </span><span class="nx">Memory</span><span class="o">-</span><span class="nx">bound</span><span class="w"> </span><span class="nx">vs</span><span class="w"> </span><span class="nx">Compute</span><span class="o">-</span><span class="nx">bound分析</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">Roofline模型应用</span>
+
+<span class="nx">性能上界由计算能力和内存带宽共同决定</span><span class="err">：</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Performance</span><span class="p">}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">min</span><span class="p">(</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Peak</span><span class="err">\</span><span class="nx">_FLOPS</span><span class="p">},</span><span class="w"> </span><span class="nx">AI</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Bandwidth</span><span class="p">})</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">分界点</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">ridge</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Peak</span><span class="err">\</span><span class="nx">_FLOPS</span><span class="p">}}{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Bandwidth</span><span class="p">}}</span><span class="err">$$</span>
+<span class="nx">对于200</span><span class="w"> </span><span class="nx">TOPS</span><span class="w"> </span><span class="nx">NPU</span><span class="w"> </span><span class="nx">with</span><span class="w"> </span><span class="mi">1</span><span class="nx">TB</span><span class="o">/</span><span class="nx">s带宽</span><span class="err">：</span>
+<span class="err">$$</span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">ridge</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="mi">200</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">10</span><span class="o">^</span><span class="p">{</span><span class="mi">12</span><span class="p">}}{</span><span class="mi">1</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="mi">10</span><span class="o">^</span><span class="p">{</span><span class="mi">12</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">200</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="w"> </span><span class="nx">ops</span><span class="o">/</span><span class="nx">byte</span><span class="p">}</span><span class="err">$$</span>
+<span class="err">####</span><span class="w"> </span><span class="nx">典型算子分类</span>
+
+<span class="o">**</span><span class="nx">Compute</span><span class="o">-</span><span class="nx">bound算子</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">大矩阵GEMM</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="err">×</span><span class="mi">1</span><span class="nx">卷积with大通道数</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="err">\</span><span class="nx">approx</span><span class="w"> </span><span class="nx">C</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="k">in</span><span class="p">}</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">标准3</span><span class="err">×</span><span class="mi">3</span><span class="nx">卷积</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="err">\</span><span class="nx">approx</span><span class="w"> </span><span class="mi">50</span><span class="o">-</span><span class="mi">100</span><span class="err">$</span>
+
+<span class="o">**</span><span class="nx">Memory</span><span class="o">-</span><span class="nx">bound算子</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">Element</span><span class="o">-</span><span class="nx">wise操作</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">1</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Pooling层</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="err">\</span><span class="nx">approx</span><span class="w"> </span><span class="m m-Double">0.5</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">Normalization</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="err">\</span><span class="nx">approx</span><span class="w"> </span><span class="mi">2</span><span class="err">$</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">小矩阵GEMM</span><span class="p">:</span><span class="w"> </span><span class="err">$</span><span class="nx">AI</span><span class="w"> </span><span class="p">&lt;</span><span class="w"> </span><span class="mi">50</span><span class="err">$</span>
+
+<span class="err">####</span><span class="w"> </span><span class="mi">2</span><span class="p">:</span><span class="mi">4</span><span class="nx">稀疏对性能的影响</span>
+
+<span class="nx">结构化稀疏改变计算密度</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">有效算术强度</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">sparse</span><span class="p">}}</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">dense</span><span class="p">}}}{</span><span class="mi">2</span><span class="p">}</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="mi">1</span><span class="p">}{</span><span class="m m-Double">0.75</span><span class="p">}</span><span class="err">$$</span>
+<span class="nx">压缩率50</span><span class="o">%</span><span class="err">，</span><span class="nx">但索引开销25</span><span class="o">%</span><span class="err">。</span>
+
+<span class="o">**</span><span class="nx">稀疏加速条件</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Speedup</span><span class="p">}</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="err">\</span><span class="nx">iff</span><span class="w"> </span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">dense</span><span class="p">}}</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="err">\</span><span class="nx">times</span><span class="w"> </span><span class="nx">AI</span><span class="err">\</span><span class="nx">_</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">ridge</span><span class="p">}}</span><span class="err">$$</span>
+<span class="nx">仅对compute</span><span class="o">-</span><span class="nx">bound算子有效</span><span class="err">。</span>
+
+<span class="err">###</span><span class="w"> </span><span class="m m-Double">2.3.5</span><span class="w"> </span><span class="nx">算子融合机会识别</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">垂直融合</span><span class="err">（</span><span class="nx">Producer</span><span class="o">-</span><span class="nx">Consumer</span><span class="err">）</span>
+
+<span class="nx">连续算子融合减少中间结果的内存访问</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">Conv</span><span class="o">-</span><span class="nx">BN</span><span class="o">-</span><span class="nx">ReLU融合</span><span class="err">：</span><span class="o">**</span>
+<span class="nx">原始计算</span><span class="err">：</span>
+
+<span class="mi">1</span><span class="p">.</span><span class="w"> </span><span class="err">$</span><span class="nx">Y</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Conv</span><span class="p">}(</span><span class="nx">X</span><span class="p">,</span><span class="w"> </span><span class="nx">W</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">b</span><span class="err">$</span>
+<span class="mi">2</span><span class="p">.</span><span class="w"> </span><span class="err">$</span><span class="nx">Z</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">gamma</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="nx">Y</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">\</span><span class="nx">mu</span><span class="p">}{</span><span class="err">\</span><span class="nx">sqrt</span><span class="p">{</span><span class="err">\</span><span class="nx">sigma</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">epsilon</span><span class="p">}}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">beta</span><span class="err">$</span>
+<span class="mi">3</span><span class="p">.</span><span class="w"> </span><span class="err">$</span><span class="nx">A</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nx">Z</span><span class="p">)</span><span class="err">$</span>
+
+<span class="nx">融合后</span><span class="err">：</span>
+<span class="err">$$</span><span class="nx">A</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="err">\</span><span class="nx">max</span><span class="err">\</span><span class="nx">left</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">gamma</span><span class="w"> </span><span class="err">\</span><span class="nx">frac</span><span class="p">{</span><span class="err">\</span><span class="nx">text</span><span class="p">{</span><span class="nx">Conv</span><span class="p">}(</span><span class="nx">X</span><span class="p">,</span><span class="w"> </span><span class="nx">W</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">b</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">\</span><span class="nx">mu</span><span class="p">}{</span><span class="err">\</span><span class="nx">sqrt</span><span class="p">{</span><span class="err">\</span><span class="nx">sigma</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">epsilon</span><span class="p">}}</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">\</span><span class="nx">beta</span><span class="err">\</span><span class="nx">right</span><span class="p">)</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">内存节省</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">原始</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="nx">次feature</span><span class="w"> </span><span class="nx">map读写</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">融合</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="nx">次读写</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">带宽降低</span><span class="p">:</span><span class="w"> </span><span class="mi">67</span><span class="o">%</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">水平融合</span><span class="err">（</span><span class="nx">并行算子</span><span class="err">）</span>
+
+<span class="nx">并行执行多个独立算子</span><span class="err">：</span>
+
+<span class="o">**</span><span class="nx">多头注意力的QKV投影</span><span class="err">：</span><span class="o">**</span>
+<span class="err">$$</span><span class="nx">Q</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">XW</span><span class="err">\</span><span class="nx">_Q</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">quad</span><span class="w"> </span><span class="nx">K</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">XW</span><span class="err">\</span><span class="nx">_K</span><span class="p">,</span><span class="w"> </span><span class="err">\</span><span class="nx">quad</span><span class="w"> </span><span class="nx">V</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">XW</span><span class="err">\</span><span class="nx">_V</span><span class="err">$$</span>
+<span class="nx">融合为单个GEMM</span><span class="err">：</span>
+<span class="err">$$</span><span class="p">[</span><span class="nx">Q</span><span class="p">,</span><span class="w"> </span><span class="nx">K</span><span class="p">,</span><span class="w"> </span><span class="nx">V</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">X</span><span class="p">[</span><span class="nx">W</span><span class="err">\</span><span class="nx">_Q</span><span class="p">,</span><span class="w"> </span><span class="nx">W</span><span class="err">\</span><span class="nx">_K</span><span class="p">,</span><span class="w"> </span><span class="nx">W</span><span class="err">\</span><span class="nx">_V</span><span class="p">]</span><span class="err">$$</span>
+<span class="o">**</span><span class="nx">优势</span><span class="err">：</span><span class="o">**</span>
+
+<span class="o">-</span><span class="w"> </span><span class="nx">输入数据重用3倍</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">更好的矩阵维度for</span><span class="w"> </span><span class="nx">tiling</span>
+<span class="o">-</span><span class="w"> </span><span class="nx">减少kernel启动开销</span>
+
+<span class="err">####</span><span class="w"> </span><span class="nx">图级优化机会</span>
+
+<span class="o">**</span><span class="nx">Transformer块的端到端融合</span><span class="err">：</span><span class="o">**</span>
 </code></pre></div>
 
-<p><strong>Loop tiling优化：</strong>
-将循环分块以适配片上存储：
-$$T_h \times T_w \times C_{in} \times \text{sizeof(dtype)} \leq \text{SRAM}_{\text{size}}$$</p>
-<h3 id="233-attention">2.3.3 Attention的计算瓶颈</h3>
-<h4 id="attention">标准Attention的二次复杂度</h4>
-<p>Self-attention计算：
-$$\text{Attention}(Q,K,V) = \text{Softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V$$
-<strong>计算复杂度：</strong></p>
-<ul>
-<li>QK矩阵乘: $O(N^2 \times d)$</li>
-<li>Softmax: $O(N^2)$</li>
-<li>Score×V: $O(N^2 \times d)$</li>
-<li>总计: $O(N^2 \times d)$</li>
-</ul>
-<p><strong>内存需求：</strong>
-存储attention矩阵需要 $N^2 \times \text{sizeof(dtype)}$ 字节。</p>
-<p>对于序列长度 $N=2048$, fp16精度：
-$$\text{Memory} = 2048^2 \times 2 = 8\text{MB}$$</p>
-<h4 id="flash-attention">Flash Attention的分块计算</h4>
-<p>Flash Attention通过分块降低内存访问：</p>
-<p><strong>分块策略：</strong>
-将 $Q,K,V \in \mathbb{R}^{N \times d}$ 分为大小为 $B_r \times d$ 和 $B_c \times d$ 的块。</p>
-<p><strong>Online softmax：</strong>
-$$m^{(j+1)} = \max(m^{(j)}, \tilde{m}^{(j)})$$
-$$l^{(j+1)} = e^{m^{(j)} - m^{(j+1)}} l^{(j)} + e^{\tilde{m}^{(j)} - m^{(j+1)}} \tilde{l}^{(j)}$$
-<strong>IO复杂度降低：</strong>
-$$\text{IO}_{\text{Flash}} = O\left(\frac{N^2d}{M^{1/2}}\right)$$
-其中 $M$ 为SRAM大小。相比标准attention的 $O(N^2d)$，显著降低。</p>
-<h3 id="234-memory-bound-vs-compute-bound">2.3.4 Memory-bound vs Compute-bound分析</h3>
-<h4 id="roofline">Roofline模型应用</h4>
-<p>性能上界由计算能力和内存带宽共同决定：
-$$\text{Performance} = \min(\text{Peak_FLOPS}, AI \times \text{Bandwidth})$$
-<strong>分界点：</strong>
-$$AI_{\text{ridge}} = \frac{\text{Peak_FLOPS}}{\text{Bandwidth}}$$
-对于200 TOPS NPU with 1TB/s带宽：
-$$AI_{\text{ridge}} = \frac{200 \times 10^{12}}{1 \times 10^{12}} = 200 \text{ ops/byte}$$</p>
-<h4 id="_1">典型算子分类</h4>
-<p><strong>Compute-bound算子：</strong></p>
-<ul>
-<li>大矩阵GEMM: $AI &gt; 100$</li>
-<li>1×1卷积with大通道数: $AI \approx C_{in}$</li>
-<li>标准3×3卷积: $AI \approx 50-100$</li>
-</ul>
-<p><strong>Memory-bound算子：</strong></p>
-<ul>
-<li>Element-wise操作: $AI &lt; 1$</li>
-<li>Pooling层: $AI \approx 0.5$</li>
-<li>Normalization: $AI \approx 2$</li>
-<li>小矩阵GEMM: $AI &lt; 50$</li>
-</ul>
-<h4 id="24">2:4稀疏对性能的影响</h4>
-<p>结构化稀疏改变计算密度：</p>
-<p><strong>有效算术强度：</strong>
-$$AI_{\text{sparse}} = \frac{AI_{\text{dense}}}{2} \times \frac{1}{0.75}$$
-压缩率50%，但索引开销25%。</p>
-<p><strong>稀疏加速条件：</strong>
-$$\text{Speedup} &gt; 1 \iff AI_{\text{dense}} &gt; 2 \times AI_{\text{ridge}}$$
-仅对compute-bound算子有效。</p>
-<h3 id="235">2.3.5 算子融合机会识别</h3>
-<h4 id="producer-consumer">垂直融合（Producer-Consumer）</h4>
-<p>连续算子融合减少中间结果的内存访问：</p>
-<p><strong>Conv-BN-ReLU融合：</strong>
-原始计算：</p>
-<ol>
-<li>$Y = \text{Conv}(X, W) + b$</li>
-<li>$Z = \gamma \frac{Y - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$</li>
-<li>$A = \max(0, Z)$</li>
-</ol>
-<p>融合后：
-$$A = \max\left(0, \gamma \frac{\text{Conv}(X, W) + b - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta\right)$$
-<strong>内存节省：</strong></p>
-<ul>
-<li>原始: 3次feature map读写</li>
-<li>融合: 1次读写</li>
-<li>带宽降低: 67%</li>
-</ul>
-<h4 id="_2">水平融合（并行算子）</h4>
-<p>并行执行多个独立算子：</p>
-<p><strong>多头注意力的QKV投影：</strong>
-$$Q = XW_Q, \quad K = XW_K, \quad V = XW_V$$
-融合为单个GEMM：
-$$[Q, K, V] = X[W_Q, W_K, W_V]$$
-<strong>优势：</strong></p>
-<ul>
-<li>输入数据重用3倍</li>
-<li>更好的矩阵维度for tiling</li>
-<li>减少kernel启动开销</li>
-</ul>
-<h4 id="_3">图级优化机会</h4>
-<p><strong>Transformer块的端到端融合：</strong></p>
-<div class="codehilite"><pre><span></span><code>Input → LayerNorm → Multi-Head Attention → Residual Add
+<p>Input → LayerNorm → Multi-Head Attention → Residual Add
       → LayerNorm → FFN → Residual Add → Output
-</code></pre></div>
-
+```</p>
 <p>识别融合pattern：</p>
 <ol>
 <li>Pre-norm与attention融合</li>
@@ -859,7 +1243,7 @@ $$[Q, K, V] = X[W_Q, W_K, W_V]$$
 <li>避免中间结果的精度损失</li>
 <li>整体延迟降低20-30%</li>
 </ul>
-<h2 id="_4">本章小结</h2>
+<h2 id="_1">本章小结</h2>
 <p>本章系统分析了自动驾驶和具身智能场景下的算法工作负载特征，建立了从网络架构到算子实现的完整性能模型。</p>
 <p><strong>核心要点：</strong></p>
 <ol>
@@ -896,8 +1280,8 @@ $$[Q, K, V] = X[W_Q, W_K, W_V]$$
 <li>稀疏加速条件: $AI_{\text{dense}} &gt; 2 \times AI_{\text{ridge}}$</li>
 <li>Attention复杂度: $O(N^2 \times d)$ vs Flash: $O(\frac{N^2d}{\sqrt{M}})$</li>
 </ul>
-<h2 id="_5">练习题</h2>
-<h3 id="_6">基础题</h3>
+<h2 id="_2">练习题</h2>
+<h3 id="_3">基础题</h3>
 <p><strong>练习 2.1</strong>: 计算YOLOv8在640×640输入下的总FLOPs，假设backbone采用CSPDarknet，neck采用PANet。列出每个stage的计算量。</p>
 <details>
 <summary>提示</summary>
@@ -949,7 +1333,7 @@ $$[Q, K, V] = X[W_Q, W_K, W_V]$$
 <li>因为 AI &gt; AI_ridge (139.6 &gt; 100)，所以是compute-bound</li>
 </ul>
 </details>
-<h3 id="_7">挑战题</h3>
+<h3 id="_4">挑战题</h3>
 <p><strong>练习 2.4</strong>: 设计一个算子融合方案，将Transformer的一个完整block（包括Multi-Head Attention和FFN）融合为最少的kernel调用。计算融合前后的内存访问量差异。</p>
 <details>
 <summary>提示</summary>
@@ -1153,8 +1537,8 @@ $$S = \frac{1}{0.5 + 0.25} = 1.33$$</p>
 <li>确保数据对齐到cache line</li>
 <li>减少layout转换开销</li>
 </ul>
-<h2 id="_8">最佳实践检查清单</h2>
-<h3 id="_9">算法分析阶段</h3>
+<h2 id="_5">最佳实践检查清单</h2>
+<h3 id="_6">算法分析阶段</h3>
 <ul>
 <li>[ ] <strong>工作负载画像</strong></li>
 <li>统计各类算子的比例</li>
@@ -1177,7 +1561,7 @@ $$S = \frac{1}{0.5 + 0.25} = 1.33$$</p>
 <li>为各模块分配时间预算</li>
 <li>识别关键路径</li>
 </ul>
-<h3 id="_10">算子优化阶段</h3>
+<h3 id="_7">算子优化阶段</h3>
 <ul>
 <li>[ ] <strong>算子融合识别</strong></li>
 <li>标记可融合的算子序列</li>
@@ -1200,7 +1584,7 @@ $$S = \frac{1}{0.5 + 0.25} = 1.33$$</p>
 <li>流水线深度设计</li>
 <li>负载均衡考虑</li>
 </ul>
-<h3 id="_11">实现验证阶段</h3>
+<h3 id="_8">实现验证阶段</h3>
 <ul>
 <li>[ ] <strong>性能验证</strong></li>
 <li>Cycle-accurate仿真</li>

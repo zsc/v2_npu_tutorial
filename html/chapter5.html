@@ -187,12 +187,49 @@
 <li><strong>数据重用</strong>：通过数据在PE间传递实现高效重用，每个数据项被多个PE使用，大幅降低了内存带宽需求。例如，在矩阵乘法中，每个输入元素被重用N次（N为阵列维度），相比直接从内存读取，可以减少N倍的带宽需求</li>
 </ul>
 <p>脉动阵列的数学基础建立在矩阵运算的规律性上。考虑矩阵乘法 $C = A \times B$，其中 $C_{ij} = \sum_{k} A_{ik} \times B_{kj}$。这个计算具有高度的规律性和并行性：每个输出元素的计算相互独立，且都需要执行相同的运算序列（乘累加）。脉动阵列正是利用了这种规律性，将计算在空间（多个PE）和时间（多个周期）上展开。</p>
+<p>深入理解脉动阵列的理论基础需要从计算的数据依赖图（Data Dependence Graph, DDG）入手。对于矩阵乘法，DDG具有高度规则的结构：每个 $C_{ij}$ 的计算依赖于第i行的所有A元素和第j列的所有B元素。这种规则性使得可以通过系统化的方法将算法映射到硬件架构上。</p>
+<p><strong>空间-时间映射理论</strong>：
+脉动阵列的设计本质上是将算法的迭代空间（iteration space）映射到处理器的空间-时间域。对于三重循环的矩阵乘法：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="n">M</span><span class="o">-</span><span class="mi">1</span><span class="err">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="n">N</span><span class="o">-</span><span class="mi">1</span><span class="err">:</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="n">K</span><span class="o">-</span><span class="mi">1</span><span class="err">:</span>
+<span class="w">            </span><span class="n">C</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">A</span><span class="o">[</span><span class="n">i</span><span class="o">][</span><span class="n">k</span><span class="o">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">k</span><span class="o">][</span><span class="n">j</span><span class="o">]</span>
+</code></pre></div>
+
+<p>这个迭代空间是一个三维空间 $(i,j,k)$，脉动阵列将其映射为：</p>
+<ul>
+<li>空间维度：$(i,j)$ 映射到PE阵列的物理位置</li>
+<li>时间维度：$k$ 映射到时间步，每个时间步处理一个k值</li>
+</ul>
+<p>这种映射的数学表达为：
+$$\begin{bmatrix} PE_x \\ PE_y \\ t \end{bmatrix} = \begin{bmatrix} 1 &amp; 0 &amp; 0 \\ 0 &amp; 1 &amp; 0 \\ 0 &amp; 0 &amp; 1 \end{bmatrix} \begin{bmatrix} i \\ j \\ k \end{bmatrix}$$
+这是最简单的恒等映射，实际设计中可能使用更复杂的仿射变换来优化数据重用和减少通信。</p>
 <p>从数据流的角度看，脉动阵列实现了三种关键的数据移动模式：</p>
 <ol>
-<li><strong>单播到多播的转换</strong>：一个输入数据通过PE间的传递被多个计算单元使用。这种机制将原本的一对多通信转换为多个一对一通信，极大地简化了互连网络的设计</li>
-<li><strong>流水线化的累加</strong>：部分和在PE间传递并逐步累加，避免了全局归约的开销。传统的树状归约需要log(N)级的加法器和复杂的控制逻辑，而脉动阵列通过空间展开实现了线性时间的累加</li>
+<li><strong>单播到多播的转换</strong>：一个输入数据通过PE间的传递被多个计算单元使用。这种机制将原本的一对多通信转换为多个一对一通信，极大地简化了互连网络的设计。具体而言，如果使用总线实现一对多通信，需要驱动N个负载，这会导致延迟和功耗都随N线性增长；而脉动阵列的邻近通信只需要驱动单个负载</li>
+<li><strong>流水线化的累加</strong>：部分和在PE间传递并逐步累加，避免了全局归约的开销。传统的树状归约需要log(N)级的加法器和复杂的控制逻辑，而脉动阵列通过空间展开实现了线性时间的累加。更重要的是，流水线化的累加可以与新的乘法运算重叠，实现计算的连续性</li>
 <li><strong>时空映射</strong>：将算法的循环嵌套映射到硬件的空间维度和时间维度。这种映射将串行算法的循环迭代转换为并行硬件的空间分布和时间步进，实现了算法到硬件的自然映射</li>
 </ol>
+<p><strong>数据复用的定量分析</strong>：
+脉动阵列的一个核心优势是数据复用。我们可以定量分析不同级别的数据复用：</p>
+<ol>
+<li>
+<p><strong>时间复用（Temporal Reuse）</strong>：同一个PE在不同时间使用相同数据
+   - 在Weight-stationary设计中，权重在PE中驻留整个计算过程
+   - 复用因子：等于处理的批次数B</p>
+</li>
+<li>
+<p><strong>空间复用（Spatial Reuse）</strong>：不同PE使用相同数据
+   - 输入激活在水平方向传播，被每行的所有PE使用
+   - 复用因子：等于阵列的列数N</p>
+</li>
+<li>
+<p><strong>总复用因子</strong>：$R_{total} = R_{temporal} \times R_{spatial} = B \times N$</p>
+</li>
+</ol>
+<p>这意味着每个数据项从内存读取一次后，可以被使用 $B \times N$ 次，极大地提高了运算强度（Operational Intensity）：
+$$OI = \frac{计算量}{数据移动量} = \frac{2MNK}{M \times K + K \times N + M \times N} \approx \frac{2K}{1 + \frac{1}{M} + \frac{1}{N}}$$
+当M和N足够大时，$OI \approx 2K$，这解释了为什么脉动阵列特别适合深度（K维度大）的矩阵乘法。</p>
 <p>基本的一维脉动阵列可以表示为：</p>
 <div class="codehilite"><pre><span></span><code><span class="n">时刻</span><span class="w"> </span><span class="n">t</span><span class="o">=</span><span class="mi">0</span><span class="err">:</span><span class="w">  </span><span class="o">[</span><span class="n">a0</span><span class="o">]</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE0</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE1</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE2</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE3</span>
 <span class="n">时刻</span><span class="w"> </span><span class="n">t</span><span class="o">=</span><span class="mi">1</span><span class="err">:</span><span class="w">  </span><span class="o">[</span><span class="n">a1</span><span class="o">]</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE0</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE1</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE2</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">PE3</span>
@@ -243,7 +280,17 @@ $$T_{total} = L_{startup} + \lceil \frac{M}{m} \rceil \times \lceil \frac{K}{1} 
 <li><strong>Row-stationary (RS)</strong>：每行PE保持特定数据，其他数据流动</li>
 </ol>
 <p>TPU选择Weight-stationary设计的关键原因深植于深度学习工作负载的特性。在推理场景中，模型权重是固定的，而输入数据不断变化。Weight-stationary设计完美契合了这一特点。</p>
-<p>从能量效率的角度看，Weight-stationary的优势源于数据移动能耗的基本物理定律。根据电容充放理论，移动n位数据的能耗为 $E = C \times V^2$，其中$C$为线路电容，$V$为电压。在现代工艺下，电容随着距离增加而线性增长，这意味着远距离数据移动的能耗会显著增加。通过将权重固定在PE中，避免了大量的权重数据移动，从而大幅降低能耗。</p>
+<p>从能量效率的角度看，Weight-stationary的优势源于数据移动能耗的基本物理定律。根据电容充放电理论，移动n位数据的能耗为 $E = \frac{1}{2} C \times V^2 \times f \times \alpha$，其中$C$为线路电容，$V$为电压，$f$为频率，$\alpha$为翻转因子。在现代工艺下，电容随着距离增加而线性增长：$C = C_0 + c_w \times L$，其中$C_0$是驱动器和接收器的固定电容，$c_w$是单位长度的线电容（典型值0.2fF/μm），$L$是连线长度。</p>
+<p><strong>能耗层次分析</strong>：
+现代芯片中，数据移动的能耗呈现明显的层次结构：</p>
+<ul>
+<li>寄存器访问：~0.1 pJ/bit</li>
+<li>L1 Cache访问：~0.5 pJ/bit</li>
+<li>L2 Cache访问：~5 pJ/bit</li>
+<li>片上SRAM访问：~10 pJ/bit</li>
+<li>DRAM访问：~100 pJ/bit</li>
+</ul>
+<p>这个能耗金字塔清楚地表明，将数据保持在尽可能接近计算单元的地方至关重要。Weight-stationary通过将权重锁定在PE的本地寄存器中（最低能耗层次），实现了能效最优化。</p>
 <p><strong>优势分析</strong>：</p>
 <ul>
 <li><strong>能效最优</strong>：权重静止避免了大量数据移动，减少动态功耗。在现代工艺节点下，数据移动的能耗往往超过计算本身。45nm工艺下，32位浮点运算约需50pJ，而从DRAM读取32位数据需要640pJ，是计算的12.8倍</li>
@@ -307,14 +354,21 @@ $D_{OS} = B \times W + A_{in} + A_{out}$</p>
 </li>
 </ol>
 <p><strong>维度选择的设计空间探索</strong>：</p>
-<p>选择最优的阵列维度需要考虑多个因素：</p>
+<p>选择最优的阵列维度需要考虑多个因素，这是一个复杂的多目标优化问题。</p>
 <ol>
-<li>
-<p><strong>目标工作负载分析</strong>：
-   - 统计常见层的维度分布
-   - 识别性能关键层（通常是大的FC层和Conv层）
-   - 考虑未来模型趋势（如Transformer的大矩阵乘法）</p>
-</li>
+<li><strong>目标工作负载分析</strong>：
+   - 统计常见层的维度分布：需要收集目标应用的所有层参数，建立维度分布直方图
+   - 识别性能关键层：通常遵循帕累托原则，20%的层占据80%的计算量
+   - 考虑未来模型趋势：Transformer模型倾向于使用更大的隐藏维度（如4096、8192）</li>
+</ol>
+<p>以BERT-Large为例，其关键维度包括：</p>
+<ul>
+<li>注意力矩阵乘法：[batch×seq, 1024] × [1024, 1024]</li>
+<li>FFN第一层：[batch×seq, 1024] × [1024, 4096]</li>
+<li>FFN第二层：[batch×seq, 4096] × [4096, 1024]</li>
+</ul>
+<p>对于batch=32, seq=512的典型配置，第一个维度达到16384，这就需要考虑如何高效地将其映射到物理阵列上。</p>
+<ol start="2">
 <li>
 <p><strong>硬件约束</strong>：
    - 芯片面积：$Area \propto M \times N$（PE数量）。在现代工艺下，每个INT8 MAC单元约需100-200平方微米，256×256阵列需要约13平方毫米
@@ -344,13 +398,42 @@ $D_{OS} = B \times W + A_{in} + A_{out}$</p>
 <h2 id="52-tpu-v1-v4i">5.2 TPU v1-v4i架构演进</h2>
 <h3 id="521-tpu-v1">5.2.1 TPU v1：推理专用架构</h3>
 <p>TPU v1是Google的第一代张量处理器，专为数据中心推理工作负载设计。这个项目始于2013年，当时Google意识到如果所有用户每天使用3分钟的语音搜索，需要的计算资源将是当时数据中心容量的两倍。这促使Google开发专用硬件来加速神经网络推理。</p>
+<p><strong>项目背景与动机</strong>：</p>
+<p>2013年，Google面临着一个关键挑战：深度学习模型在语音识别、图像分类等任务上取得了突破性进展，但部署成本极高。具体数据显示：</p>
+<ul>
+<li>语音搜索的计算需求以每年10倍的速度增长</li>
+<li>如果使用CPU处理所有语音请求，需要将数据中心规模扩大100倍</li>
+<li>GPU虽然提供了加速，但功耗过高（250W），不适合大规模数据中心部署</li>
+</ul>
+<p>这促使Google做出了一个大胆的决定：设计专用的推理芯片。项目代号"Manhattan"，目标是在15个月内完成从架构设计到批量部署。</p>
 <p><strong>设计理念与目标</strong>：</p>
 <p>TPU v1的设计哲学是"做一件事，并把它做到极致"。与GPU试图兼顾图形渲染和通用计算不同，TPU v1专注于神经网络推理这一个任务。这种专注带来了几个关键优势：</p>
 <ul>
-<li>去除了不必要的硬件（如纹理单元、光栅化器）</li>
-<li>简化了编程模型（无需考虑图形API兼容性）</li>
-<li>优化了数据通路（专门为张量运算设计）</li>
+<li>去除了不必要的硬件：没有纹理单元、光栅化器、几何处理器等GPU特有组件</li>
+<li>简化了编程模型：不需要CUDA那样复杂的编程接口，只需要简单的矩阵运算原语</li>
+<li>优化了数据通路：专门为张量运算设计，去除了通用处理器的分支预测、乱序执行等开销</li>
 </ul>
+<p><strong>架构决策的深层考虑</strong>：</p>
+<ol>
+<li>
+<p><strong>为什么选择INT8而非FP16/FP32</strong>：
+   - Google的大规模实验表明，对于已训练模型，INT8量化的精度损失可控（&lt;1%）
+   - INT8乘法器面积仅为FP32的1/6，功耗为1/10
+   - 内存带宽需求减少4倍，这在内存墙问题日益严重的今天尤为重要</p>
+</li>
+<li>
+<p><strong>为什么选择256×256的阵列规模</strong>：
+   - 太小（如64×64）：控制开销比例过高，利用率受限
+   - 太大（如512×512）：面积和功耗呈平方增长，时序收敛困难
+   - 256×256是sweet spot：在28nm工艺下，可以达到700MHz主频，同时保持合理的面积（~80mm²）</p>
+</li>
+<li>
+<p><strong>为什么采用脉动阵列而非其他架构</strong>：
+   - SIMD向量处理器：带宽需求过高，每个周期需要读取所有操作数
+   - 多核MIMD：同步开销大，编程模型复杂
+   - 脉动阵列：数据重用率高，编程模型简单，硬件效率最高</p>
+</li>
+</ol>
 <p><strong>核心规格</strong>：</p>
 <ul>
 <li>脉动阵列：256×256 (65,536个MAC单元)</li>
@@ -388,17 +471,52 @@ $D_{OS} = B \times W + A_{in} + A_{out}$</p>
 <li><strong>统一缓冲区</strong>：灵活分配权重和激活存储。24MB的容量可以存储整个ResNet-50的权重，避免频繁的DRAM访问</li>
 </ul>
 <p><strong>量化策略深入分析</strong>：</p>
-<p>TPU v1采用的INT8量化包含几个关键技术：</p>
+<p>TPU v1采用的INT8量化包含几个关键技术，这些技术后来成为业界标准：</p>
 <ol>
-<li><strong>非对称量化</strong>：$q = round(r/s) + z$，其中r是实数，s是缩放因子，z是零点</li>
-<li><strong>逐通道量化</strong>：每个输出通道使用独立的缩放因子，提高精度</li>
-<li><strong>激活函数融合</strong>：ReLU6自然限制了激活值范围，简化量化</li>
+<li><strong>非对称量化</strong>：$q = \text{round}(r/s) + z$
+   - r：实数值
+   - s：缩放因子（scale）
+   - z：零点（zero point）</li>
 </ol>
+<p>非对称量化相比对称量化的优势在于可以更好地处理激活值的非对称分布。例如，ReLU后的激活值都是非负的，使用非对称量化可以充分利用INT8的表示范围。</p>
+<ol start="2">
+<li><strong>逐通道量化</strong>：
+   每个输出通道使用独立的缩放因子，这是因为不同通道的权重分布差异很大。实验表明：</li>
+</ol>
+<ul>
+<li>逐层量化：精度损失2-5%</li>
+<li>逐通道量化：精度损失&lt;0.5%</li>
+<li>开销：需要存储额外的缩放因子（每通道4字节）</li>
+</ul>
+<ol start="3">
+<li><strong>激活函数融合</strong>：
+   ReLU6（$y = \min(\max(x, 0), 6)$）的使用有多重考虑：</li>
+</ol>
+<ul>
+<li>自然限制输出范围到[0, 6]，简化量化</li>
+<li>防止激活值爆炸，提高数值稳定性</li>
+<li>硬件实现简单，只需要比较器和多路选择器</li>
+</ul>
+<ol start="4">
+<li><strong>量化感知的编译优化</strong>：
+   编译器在量化时会进行以下优化：</li>
+</ol>
+<ul>
+<li>常量折叠：预计算可以离线完成的量化操作</li>
+<li>重排序：将量化/反量化操作移动到计算密集区域的边界</li>
+<li>融合：将量化与其他操作（如激活函数）融合，减少内存访问</li>
+</ul>
 <p>性能分析：</p>
 <ul>
-<li>理论峰值：$256 \times 256 \times 2 \times 700MHz = 92$ TOPS</li>
-<li>实际利用率：典型60-80%（取决于层维度）</li>
-<li>瓶颈分析：内存带宽限制大模型性能</li>
+<li>理论峰值：$256 \times 256 \times 2 \times 700\text{MHz} = 91.75$ TOPS</li>
+<li>实际利用率：</li>
+<li>大矩阵（&gt;1024×1024）：75-85%</li>
+<li>中等矩阵（256-1024）：60-75%</li>
+<li>小矩阵（&lt;256）：30-50%</li>
+<li>瓶颈分析：</li>
+<li>计算瓶颈：当矩阵足够大且在片上缓存中时</li>
+<li>内存瓶颈：当工作集超过24MB统一缓冲区时</li>
+<li>同步瓶颈：当有大量小矩阵运算时</li>
 </ul>
 <p><strong>实际应用案例</strong>：</p>
 <ul>
@@ -407,16 +525,37 @@ $D_{OS} = B \times W + A_{in} + A_{out}$</p>
 <li>能效比：相比K80 GPU提升29倍（TOPS/W）</li>
 </ul>
 <h3 id="522-tpu-v2v3">5.2.2 TPU v2/v3：训练能力扩展</h3>
-<p>TPU v2引入了训练支持，v3进一步提升了性能和内存容量。</p>
+<p>TPU v2标志着Google从推理专用向训练推理一体化的战略转变。这个转变背后有深刻的技术和商业考量。</p>
+<p><strong>从v1到v2的架构革新</strong>：</p>
+<p>TPU v2不是v1的简单升级，而是一次彻底的架构重新设计。主要驱动因素包括：</p>
+<ol>
+<li><strong>训练需求激增</strong>：2016-2017年，Google内部的模型训练需求每3.5个月翻倍</li>
+<li><strong>模型规模爆炸</strong>：BERT、GPT等大模型需要数千GPU天的训练时间</li>
+<li><strong>软硬件协同</strong>：TensorFlow的发展需要配套的训练硬件</li>
+</ol>
 <p><strong>TPU v2关键升级</strong>：</p>
 <ul>
-<li>脉动阵列：128×128 (每个核心)</li>
-<li>核心数量：2个核心/芯片</li>
-<li>浮点支持：bfloat16训练，混合精度</li>
-<li>HBM容量：16GB HBM</li>
-<li>内存带宽：600GB/s</li>
-<li>峰值性能：45 TFLOPS/核心</li>
+<li>脉动阵列：128×128 (每个核心)，相比v1的256×256看似"缩水"，实际是为了更好的频率扩展</li>
+<li>核心数量：2个核心/芯片，实现芯片级并行</li>
+<li>浮点支持：bfloat16训练，这是Google的独创格式</li>
+<li>HBM容量：16GB HBM2，带宽密度是DDR3的20倍</li>
+<li>内存带宽：600GB/s，解决了v1的内存瓶颈</li>
+<li>峰值性能：45 TFLOPS/核心（bfloat16）</li>
+<li>工艺节点：升级到16nm FinFET</li>
 </ul>
+<p><strong>bfloat16的设计智慧</strong>：</p>
+<p>bfloat16（Brain Floating Point）是Google专门为深度学习设计的数据格式：</p>
+<ul>
+<li>格式：1位符号 + 8位指数 + 7位尾数</li>
+<li>动态范围：与FP32相同（指数位数相同）</li>
+<li>精度：低于FP16，但对深度学习够用</li>
+</ul>
+<p>为什么选择bfloat16而非FP16？</p>
+<ol>
+<li><strong>动态范围优先</strong>：深度学习中，动态范围比精度更重要</li>
+<li><strong>转换简单</strong>：FP32到bfloat16只需截断尾数，无需调整指数</li>
+<li><strong>硬件友好</strong>：可以复用FP32的指数处理逻辑</li>
+</ol>
 <p><strong>TPU v3增强</strong>：</p>
 <ul>
 <li>HBM容量：32GB（2倍提升）</li>
@@ -526,7 +665,15 @@ GEMM → Bias → Activation 融合执行
 <h3 id="531-vliw-vs-mimd-vs-simd">5.3.1 VLIW vs MIMD vs SIMD架构对比</h3>
 <p>脉动阵列的控制方式直接影响其灵活性和效率。TPU采用了CISC风格的指令集，结合了多种控制模式的优点。理解这些控制模式的权衡对于设计高效的NPU至关重要。</p>
 <p><strong>控制架构的历史演进</strong>：</p>
-<p>计算机体系结构的发展历程为我们提供了宝贵的经验。从Flynn分类法（1966年）开始，并行架构被分为SISD、SIMD、MISD和MIMD四类。NPU设计主要关注后三种：</p>
+<p>计算机体系结构的发展历程为我们提供了宝贵的经验。从Flynn分类法（1966年）开始，并行架构被分为SISD、SIMD、MISD和MIMD四类。NPU设计主要关注后三种，每种都有其独特的优势和适用场景。</p>
+<p><strong>Flynn分类法的现代解读</strong>：</p>
+<ul>
+<li><strong>SISD（Single Instruction Single Data）</strong>：传统的冯·诺依曼架构，不适合大规模并行计算</li>
+<li><strong>SIMD（Single Instruction Multiple Data）</strong>：一条指令控制多个数据通道，GPU和向量处理器的基础</li>
+<li><strong>MISD（Multiple Instruction Single Data）</strong>：理论概念，实际应用罕见</li>
+<li><strong>MIMD（Multiple Instruction Multiple Data）</strong>：多核CPU的基础，每个核心独立执行</li>
+</ul>
+<p>在NPU设计中，纯粹的分类已经不够，现代架构往往是混合式的：</p>
 <p><strong>SIMD (Single Instruction Multiple Data)</strong>：</p>
 <ul>
 <li>特点：一条指令控制多个数据通道，所有PE执行相同操作</li>
@@ -534,12 +681,25 @@ GEMM → Bias → Activation 融合执行
 <li>劣势：灵活性受限，分支效率低，遇到条件执行时需要屏蔽部分PE</li>
 </ul>
 <p>在脉动阵列中，SIMD是最自然的选择，因为矩阵乘法本质上是规则的、无分支的计算。每个PE执行相同的MAC操作，只是操作数不同。这种规律性使得SIMD控制极其高效。</p>
-<p>控制开销分析：</p>
+<p><strong>SIMD在TPU中的具体实现</strong>：</p>
+<ol>
+<li><strong>统一控制器</strong>：单个控制器向所有PE广播控制信号</li>
+<li><strong>锁步执行</strong>：所有PE在同一时钟周期执行相同操作</li>
+<li><strong>条件执行处理</strong>：通过predicate mask实现部分PE的条件执行</li>
+</ol>
+<p>控制开销的定量分析：</p>
 <ul>
-<li>传统MIMD：每个PE需要32-64位的指令存储和译码</li>
-<li>SIMD脉动阵列：整个阵列共享一套控制逻辑</li>
-<li>面积节省：约30-40%的PE面积可用于计算而非控制</li>
+<li>传统MIMD：每个PE需要：</li>
+<li>指令缓存：~2KB（64条32位指令）</li>
+<li>译码器：~1000个晶体管</li>
+<li>分支预测器：~2000个晶体管</li>
+<li>总开销：~5000个晶体管/PE</li>
+<li>SIMD脉动阵列：</li>
+<li>共享控制器：~50000个晶体管（服务256×256个PE）</li>
+<li>每PE平均：&lt;1个晶体管</li>
+<li>面积节省：&gt;99%的控制逻辑开销</li>
 </ul>
+<p>这种巨大的面积节省使得可以将更多的晶体管用于实际计算，这是脉动阵列能够达到高计算密度的关键。</p>
 <p>脉动阵列中的SIMD体现：</p>
 <div class="codehilite"><pre><span></span><code>MATRIX_MULTIPLY：
   所有PE执行: c += a × b
@@ -565,14 +725,33 @@ GEMM → Bias → Activation 融合执行
 <li>劣势：硬件复杂，同步开销大</li>
 </ul>
 <h3 id="532">5.3.2 指令调度与依赖管理</h3>
-<p>TPU的指令调度采用静态调度为主、动态调整为辅的策略。</p>
+<p>TPU的指令调度采用静态调度为主、动态调整为辅的策略。这种设计选择反映了对编译时优化和运行时效率的平衡考虑。</p>
+<p><strong>静态调度的优势</strong>：</p>
+<ol>
+<li><strong>确定性延迟</strong>：每条指令的执行时间在编译时确定，便于性能预测</li>
+<li><strong>硬件简化</strong>：不需要复杂的乱序执行单元、重排序缓冲区等</li>
+<li><strong>功耗优化</strong>：避免了动态调度的功耗开销（约占CPU功耗的20-30%）</li>
+<li><strong>调试友好</strong>：执行顺序与程序顺序一致，便于调试和验证</li>
+</ol>
 <p><strong>指令级并行(ILP)分析</strong>：</p>
 <p>设指令序列为 $I = \{i_1, i_2, ..., i_n\}$，依赖图 $G = (V, E)$：</p>
 <ul>
 <li>节点 $V$：指令</li>
-<li>边 $E$：数据依赖</li>
+<li>边 $E$：数据依赖，边权重为依赖距离（周期数）</li>
 </ul>
 <p>关键路径长度：$L_{critical} = \max_{path} \sum_{i \in path} latency(i)$</p>
+<p>并行度量化：</p>
+<ul>
+<li><strong>理论并行度</strong>：$P_{theory} = \frac{\sum_{i} latency(i)}{L_{critical}}$</li>
+<li><strong>实际并行度</strong>：$P_{actual} = \frac{\sum_{i} latency(i)}{T_{execution}}$</li>
+<li><strong>并行效率</strong>：$\eta = \frac{P_{actual}}{P_{theory}}$</li>
+</ul>
+<p>在TPU中，典型的并行效率可达80-90%，这得益于：</p>
+<ul>
+<li>规则的计算模式（矩阵运算）</li>
+<li>可预测的内存访问模式</li>
+<li>编译器的深度优化</li>
+</ul>
 <p><strong>依赖类型</strong>：</p>
 <ol>
 <li><strong>RAW (Read After Write)</strong>：真依赖</li>
