@@ -12,7 +12,16 @@ Scale-up架构通过在单一封装或节点内集成多个计算核心来提升
 
 现代NPU越来越多采用Chiplet架构，将多个小芯片通过先进封装技术集成在一起。这种方法相比单片大芯片具有更好的良率和成本效益。根据良率公式 $Y = Y_0 \times e^{-DA}$（其中D为缺陷密度，A为芯片面积），将600mm²大芯片拆分为4个150mm²小芯片，良率可从30%提升至70%以上。
 
+良率的数学建模更精确地采用Poisson-Yield模型：
+$$Y = Y_0 \times \left(1 + \frac{DA}{\alpha}\right)^{-\alpha}$$
+其中$\alpha$为聚集因子（clustering factor），典型值为2-5。对于先进工艺节点（7nm及以下），缺陷密度D约为0.1-0.2 defects/cm²。当芯片面积从600mm²降至150mm²时，不仅良率提升，关键路径的时序收敛难度也大幅降低，设计迭代周期缩短30-40%。
+
 从经济学角度分析，Chiplet的成本优势不仅体现在良率提升，还包括：（1）异构集成能力，可以混合不同工艺节点，如7nm计算die配合14nm I/O die；（2）设计复用性，标准化的chiplet可以跨产品线复用；（3）库存灵活性，可根据市场需求组合不同配置。根据业界数据，采用Chiplet架构可将总体成本降低25-40%。
+
+成本模型的定量分析：
+$$C_{total} = \frac{C_{wafer}}{N_{die} \times Y} + C_{package} + C_{test}$$
+其中$N_{die}$为每片晶圆的芯片数量，与芯片面积成反比。Chiplet方案通过提高$N_{die}$和Y，显著降低单位成本。以TSMC 7nm工艺为例，12寸晶圆成本约$15,000，600mm²芯片可切出约70个，而150mm²可切出约300个。考虑良率差异，最终成本降幅可达：
+$$\Delta C = 1 - \frac{C_{chiplet}}{C_{monolithic}} = 1 - \frac{300 \times 0.7}{70 \times 0.3} \times \frac{1}{4} \approx 0.35$$
 
 **2.5D封装 (CoWoS/EMIB)**
 
@@ -42,6 +51,19 @@ EMIB的创新在于局部嵌入式桥接，只在需要高密度互连的区域�
 信号完整性的量化分析：
 $$IL(f) = \alpha \sqrt{f} \times L + \beta f \times L$$
 其中$\alpha$为导体损耗系数(~0.2 dB/cm/√GHz)，$\beta$为介质损耗系数(~0.01 dB/cm/GHz)，L为传输线长度。对于10cm的中介层走线，在10GHz下插入损耗约为7dB，需要均衡器补偿。
+
+串扰(Crosstalk)是另一个关键挑战。近端串扰(NEXT)和远端串扰(FEXT)的数学模型：
+$$NEXT = 20\log_{10}\left(\frac{V_{coupled}}{V_{aggressor}}\right) = -20\log_{10}\left(\frac{2Z_0}{Z_{mutual}}\right)$$
+$$FEXT = NEXT + 20\log_{10}\left(e^{-\alpha L}\right)$$
+
+其中$Z_{mutual}$为互感阻抗，与线间距d成反比：$Z_{mutual} \propto 1/d$。设计准则要求NEXT < -30dB，这限制了信号密度。通过差分信号和屏蔽地线，可将串扰降低15-20dB。
+
+眼图(Eye Diagram)分析用于评估信号质量：
+- 眼高(Eye Height)：噪声容限，目标> 100mV
+- 眼宽(Eye Width)：时序容限，目标> 0.6UI
+- 抖动(Jitter)：确定性抖动(DJ) + 随机抖动(RJ)，总抖动< 0.3UI
+
+对于16Gbps信号，单位间隔UI = 62.5ps，要求总抖动< 18.75ps。这需要精确的时钟分配网络和去抖动电路(CDR)。
 
 实际设计考量：
 - 电源完整性：需预留30-40%的bump用于电源/地，采用分布式去耦设计，目标阻抗< 1mΩ
@@ -77,6 +99,25 @@ TSV特性分析：
 
 TSV的电气模型需要考虑寄生效应。TSV可以建模为RLC传输线，在高频下表现出传输线特性。串扰是另一个关键问题，相邻TSV间的耦合电容可达1-5fF，需要通过屏蔽TSV或差分信号传输来缓解。电源TSV的设计尤为关键，需要足够的数量来满足电流密度要求（<10⁵ A/cm²），同时提供低阻抗的电源分配网络。
 
+TSV的等效电路模型包含以下参数：
+$$R_{TSV} = \frac{\rho \times h}{\pi(r_{outer}^2 - r_{inner}^2)}$$
+$$L_{TSV} = \frac{\mu_0 h}{2\pi}\ln\left(\frac{r_{outer}}{r_{inner}}\right)$$
+$$C_{TSV} = \frac{2\pi\epsilon_0\epsilon_r h}{\ln(r_{depletion}/r_{outer})}$$
+
+其中h为TSV高度(50-100μm)，$r_{outer}$为TSV半径(2.5-5μm)，$r_{inner}$为导体半径，$r_{depletion}$为耗尽区半径。典型参数下：R~100mΩ，L~20pH，C~20fF。
+
+信号TSV和电源TSV的配比优化是关键设计决策。定义电源完整性指标：
+$$Z_{PDN}(f) = \left|\frac{V_{noise}(f)}{I_{load}(f)}\right| < Z_{target}$$
+
+目标阻抗$Z_{target} = \frac{V_{dd} \times ripple\%}{I_{max}}$，典型要求< 1mΩ。这需要：
+- 电源TSV数量：$N_{power} = \frac{I_{total}}{J_{max} \times A_{TSV}}$，其中$J_{max}$为最大电流密度
+- 去耦电容：每组电源TSV配置10-100nF片上去耦
+- 电源/地TSV交替排列，形成低电感回路
+
+热-电-机械多物理场耦合分析显示，TSV阵列会产生局部应力集中，最大应力可达：
+$$\sigma_{max} = E \times \alpha \times \Delta T \times \left(1 - \frac{r_{TSV}^2}{r_{KOZ}^2}\right)$$
+其中E为杨氏模量，$\alpha$为热膨胀系数差，$\Delta T$为温度变化，$r_{KOZ}$为Keep-Out Zone半径。这要求TSV间距> 20μm以避免应力导致的可靠性问题。
+
 带宽密度优势的量化分析：
 - 2.5D封装：~2-4 TB/s/mm边缘，受限于边缘周长
 - 3D封装：~10-20 TB/s/mm²面积，利用整个die面积
@@ -89,6 +130,11 @@ TSV的电气模型需要考虑寄生效应。TSV可以建模为RLC传输线，�
 多核NPU需要维护数据一致性，尤其是在共享权重参数和中间激活值时。不同于CPU的通用缓存，NPU可以利用深度学习工作负载的特定访问模式优化一致性协议。
 
 Cache一致性的本质是维护多个缓存副本的单一系统映像(Single System Image)。形式化定义：对于任意内存地址A，在任意时刻t，所有处理器观察到的A的值必须一致。这通过两个不变量保证：（1）写传播(Write Propagation)：一个处理器的写操作必须最终被其他所有处理器看到；（2）写序列化(Write Serialization)：所有处理器必须以相同的顺序观察到对同一地址的写操作。
+
+一致性模型的形式化定义基于偏序关系(Partial Order)。定义程序顺序$<_p$和内存顺序$<_m$，一致性模型规定了这两者之间的约束关系。顺序一致性(Sequential Consistency)要求：
+$$\forall op_i, op_j: op_i <_p op_j \Rightarrow op_i <_m op_j$$
+
+而弱一致性模型如TSO(Total Store Order)允许写后读重排序，提高了性能但增加了编程复杂性。NPU通常采用弱一致性配合显式同步原语，因为深度学习工作负载的数据依赖关系相对规则。
 
 **MESI协议状态机**
 
@@ -141,6 +187,16 @@ NPU特定优化：
 - **批量失效**：层间切换时批量invalidate，减少事务数，可节省30%的一致性流量
 - **Producer-Consumer模式**：识别生产者-消费者关系，采用定向传输而非广播
 
+伪共享(False Sharing)是多核系统的常见性能陷阱。当不同核心访问同一cache line的不同部分时，会触发不必要的一致性流量。定量分析：
+$$Overhead_{false} = \frac{N_{invalidations} \times T_{coherence}}{T_{computation}}$$
+
+对于典型的64B cache line，如果两个核心分别更新line内的不同32B数据，会导致ping-pong效应。解决方案包括：
+- 数据结构填充(Padding)：强制对齐到cache line边界
+- 数据布局优化：将频繁更新的数据分离到不同cache line
+- 批量更新：累积多次更新后一次性写入
+
+在200 TOPS系统中，伪共享可能导致20-30%的性能损失，通过优化可恢复大部分性能。
+
 **目录协议 (Directory-based Coherence)**
 
 对于NPU的规模化部署（8核以上），目录协议比监听协议更具扩展性。目录维护每个cache line的全局共享状态：
@@ -185,9 +241,30 @@ $$T_{3hop} = T_{req \to dir} + T_{dir \to owner} + T_{owner \to req} + T_{proces
 - **限制指针方案**：只记录有限数量(如4个)的共享者，超出时降级为广播
 - **链式目录**：共享者形成链表，目录只记录头指针，减少存储但增加延迟
 
+目录协议的性能建模需要考虑排队论效应。使用M/M/1队列模型，目录节点的平均响应时间：
+$$T_{response} = \frac{1}{\mu - \lambda}$$
+其中$\mu$为服务率，$\lambda$为到达率。当$\lambda \to \mu$时，延迟急剧增加。
+
+对于16核系统，假设每核产生100 requests/μs，目录服务率为2000 requests/μs：
+$$\rho = \frac{16 \times 100}{2000} = 0.8$$
+$$T_{queue} = \frac{\rho}{\mu(1-\rho)} = \frac{0.8}{2000 \times 0.2} = 2\mu s$$
+
+这表明当利用率超过80%时，排队延迟开始主导总延迟。解决方案包括：
+- 增加目录bank数量，分散负载
+- 采用分层目录，减少根目录压力
+- 实施请求合并，降低有效到达率
+- 使用预测机制，提前准备目录响应
+
 ### 13.1.3 NUMA效应与优化
 
 Non-Uniform Memory Access (NUMA)在多核NPU中表现为不同核心访问不同内存区域的延迟差异。这种非对称性在AI工作负载中尤为明显，因为大规模矩阵运算需要频繁访问远程内存。
+
+NUMA系统的内存访问可以用图论模型描述。将系统建模为有向图$G=(V,E)$，其中节点V代表处理器和内存，边E代表互连链路。节点i访问节点j的延迟为最短路径长度：
+$$T_{access}(i,j) = \sum_{e \in Path(i,j)} (T_{link}(e) + T_{hop}(e))$$
+
+对于规则拓扑如2D Mesh，曼哈顿距离提供了良好的延迟估计：
+$$T_{NUMA} = T_{local} + k \times (|x_i - x_j| + |y_i - y_j|)$$
+其中k为每跳延迟增量，典型值5-10ns。
 
 **延迟层次模型**
 
@@ -244,12 +321,36 @@ NUMA因子: $\alpha_{NUMA} = \frac{T_{remote}}{T_{local}}$
 带宽优化公式：
 $$B_{effective} = \min(B_{local} + \frac{B_{remote}}{\alpha_{NUMA}}, B_{interconnect})$$
 
+页面迁移(Page Migration)是动态优化NUMA访问的关键技术。定义页面p的访问开销：
+$$C_{access}(p) = \sum_{i=1}^{N} f_i(p) \times T_{access}(i, loc(p))$$
+其中$f_i(p)$为节点i对页面p的访问频率，$loc(p)$为页面当前位置。
+
+迁移决策基于成本收益分析：
+$$Benefit = T_{future} \times (C_{current} - C_{new}) - C_{migration}$$
+其中$C_{migration} = PageSize / B_{interconnect} + T_{TLB\_shootdown}$
+
+当Benefit > 0时触发迁移。典型的4KB页面迁移开销约100μs，需要累积足够的访问偏差才值得迁移。
+
 实际优化案例（200 TOPS系统）：
 - 4个NPU die，每个50 TOPS
 - 本地HBM带宽：1TB/s per die
 - Die间互连：500GB/s
 - NUMA优化前：有效带宽1.5TB/s (37.5%效率)
 - NUMA优化后：有效带宽3.2TB/s (80%效率)
+
+优化技术细节：
+1. **内存交织粒度**：从4KB页面级改为64B cache line级，提升带宽利用率
+2. **亲和性线程绑定**：使用Linux numactl或hwloc API
+3. **内存预取**：基于stride pattern预取远程数据
+4. **批量传输**：将随机访问聚合为突发传输
+
+性能计数器监控：
+- Local/Remote访问比例
+- 平均内存延迟
+- QPI/UPI链路利用率
+- 页面迁移频率
+
+通过这些优化，NUMA系统可接近UMA系统85-90%的性能。
 
 ## 13.2 Scale-out架构
 
